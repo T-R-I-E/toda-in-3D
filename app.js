@@ -669,9 +669,13 @@ function buildZip(entries) {
 // its own normal/UV for sharp rendering); the rendered scene wants that,
 // but a 3MF needs a watertight manifold. We rebuild a position-only copy
 // of the geometry and weld vertices by position before extracting.
-// Y/Z swap (Three Y-up -> 3MF Z-up) and reversed winding keep outward
-// normals correct after the handedness flip.
-function extractMesh(threeMesh) {
+//
+// Three is Y-up. 3MF/printers are Z-up. We rotate +90° about X (i.e.,
+// Three +Y becomes 3MF +Z, Three +Z becomes 3MF -Y) and then translate Y
+// so all coordinates stay positive. Winding is preserved because this is
+// a true rotation, not a reflection — earlier code did a Y↔Z swap, which
+// IS a reflection and produced a mirror-imaged print.
+function extractMesh(threeMesh, yOffset) {
   const original = threeMesh.geometry;
   const stripped = new THREE.BufferGeometry();
   stripped.setAttribute('position', original.getAttribute('position').clone());
@@ -686,15 +690,15 @@ function extractMesh(threeMesh) {
   const tmp = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
     tmp.fromBufferAttribute(pos, i).applyMatrix4(M);
-    verts.push([tmp.x, tmp.z, tmp.y]);
+    verts.push([tmp.x, yOffset - tmp.z, tmp.y]);
   }
   const tris = [];
   if (idxAttr) {
     for (let i = 0; i < idxAttr.count; i += 3) {
-      tris.push([idxAttr.getX(i), idxAttr.getX(i + 2), idxAttr.getX(i + 1)]);
+      tris.push([idxAttr.getX(i), idxAttr.getX(i + 1), idxAttr.getX(i + 2)]);
     }
   } else {
-    for (let i = 0; i < pos.count; i += 3) tris.push([i, i + 2, i + 1]);
+    for (let i = 0; i < pos.count; i += 3) tris.push([i, i + 1, i + 2]);
   }
   welded.dispose();
   stripped.dispose();
@@ -751,7 +755,22 @@ function buildModelXml(byKey) {
   return xml;
 }
 
+// Map each material key to a Bambu Studio extruder index (1-based). Plate
+// is 1 so the baseplate stays a single solid color; each other part is on
+// its own filament so the rig is easy to recolor in the slicer. User can
+// remap in Bambu's UI after loading.
+const BAMBU_EXTRUDER = {
+  plate: 1, twist: 2, prev: 3, teth: 4, lead: 5, meet: 6, post: 7,
+};
+
 function export3mf() {
+  // Y offset used by extractMesh to keep all 3MF Y coords positive after
+  // the Z-up rotation (and to put the corkline at the back of the bed,
+  // matching the editor's top-of-screen orientation).
+  const p = state.params;
+  const margin = Math.max(p.twistRadius * 2.2, 6);
+  const yOffset = (state.lines.length - 1) * p.lineSpacing + margin;
+
   const byKey = {};
   EXPORT_MATERIALS.forEach((m) => { byKey[m.key] = { verts: [], tris: [] }; });
 
@@ -759,7 +778,7 @@ function export3mf() {
     if (!o.isMesh) return;
     const key = o.userData.exportColor;
     if (!byKey[key]) return;
-    const m = extractMesh(o);
+    const m = extractMesh(o, yOffset);
     const dst = byKey[key];
     const base = dst.verts.length;
     for (const v of m.verts) dst.verts.push(v);
@@ -775,6 +794,7 @@ function export3mf() {
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+  <Default Extension="config" ContentType="application/vnd.bambulab-package.config+xml"/>
 </Types>
 `;
   const rels =
@@ -784,10 +804,26 @@ function export3mf() {
 </Relationships>
 `;
 
+  // Bambu Studio's per-object filament assignment. References the same
+  // object ids we wrote into 3D/3dmodel.model. Other slicers ignore the
+  // file (it's outside the standard 3MF schema).
+  const liveMaterials = EXPORT_MATERIALS.filter((m) => byKey[m.key].verts.length);
+  let bambuCfg = '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n';
+  liveMaterials.forEach((m, i) => {
+    const objId = 2 + i;  // mirror the numbering buildModelXml uses
+    const ext = BAMBU_EXTRUDER[m.key] ?? 1;
+    bambuCfg += `  <object id="${objId}">\n`;
+    bambuCfg += `    <metadata key="name" value="${m.name}"/>\n`;
+    bambuCfg += `    <metadata key="extruder" value="${ext}"/>\n`;
+    bambuCfg += `  </object>\n`;
+  });
+  bambuCfg += '</config>\n';
+
   const zip = buildZip([
-    { name: '[Content_Types].xml', data: strToBytes(contentTypes) },
-    { name: '_rels/.rels',         data: strToBytes(rels) },
-    { name: '3D/3dmodel.model',    data: strToBytes(modelXml) },
+    { name: '[Content_Types].xml',          data: strToBytes(contentTypes) },
+    { name: '_rels/.rels',                  data: strToBytes(rels) },
+    { name: '3D/3dmodel.model',             data: strToBytes(modelXml) },
+    { name: 'Metadata/model_settings.config', data: strToBytes(bambuCfg) },
   ]);
   download(new Blob([zip], { type: 'model/3mf' }), 'rig.3mf');
   flash(`Exported ${totalTris} triangles to rig.3mf`);
@@ -811,20 +847,25 @@ function exportScad() {
   const idx = indexTwists(state);
   const f = (n) => (Math.round(n * 1000) / 1000).toString();
 
-  // Plate bounds — same as buildScene.
-  let minX = 0, maxX = 0, maxY = 0;
+  // Plate bounds. Note: in the editor "down the screen" is increasing line
+  // index, but on a print bed "back of the bed" is increasing Y. To make
+  // the printed plate match the editor orientation, we flip the line
+  // direction here so the corkline (line 0) sits at the back of the bed.
+  let minX = 0, maxX = 0;
   state.lines.forEach((line, li) => {
     if (line.twists.length) {
       maxX = Math.max(maxX, twistX(li, line.twists.length - 1));
       minX = Math.min(minX, twistX(li, 0));
     }
-    maxY = Math.max(maxY, li * p.lineSpacing);
   });
   const margin = Math.max(p.twistRadius * 2.2, 6);
+  const lastLineY = (state.lines.length - 1) * p.lineSpacing;
   const plateW = (maxX - minX) + margin * 2;
-  const plateD = maxY + margin * 2;
+  const plateD = lastLineY + margin * 2;
   const plateX0 = (minX + maxX) / 2 - plateW / 2;
-  const plateY0 = maxY / 2 - plateD / 2;
+  const plateY0 = 0;
+  // Convert a line index to its SCAD-Y position (cork at the back).
+  const lineY = (li) => margin + (state.lines.length - 1 - li) * p.lineSpacing;
 
   const lines = [];
   lines.push(`// TODA rig — exported ${new Date().toISOString()}`);
@@ -888,7 +929,7 @@ function exportScad() {
   state.lines.forEach((line, li) => {
     line.twists.forEach((t, ti) => {
       const x = twistX(li, ti);
-      const y = li * p.lineSpacing;
+      const y = lineY(li);
       lines.push(`  hemi(${f(x)}, ${f(y)}, plateThick, twistRadius);`);
     });
   });
@@ -909,9 +950,9 @@ function exportScad() {
       const a = idx[e.from], bb = idx[e.to];
       if (!a || !bb) return;
       const x1 = twistX(a.lineIdx, a.twistIdx);
-      const y1 = a.lineIdx * p.lineSpacing;
+      const y1 = lineY(a.lineIdx);
       const x2 = twistX(bb.lineIdx, bb.twistIdx);
-      const y2 = bb.lineIdx * p.lineSpacing;
+      const y2 = lineY(bb.lineIdx);
       lines.push(`  edge(${f(x1)}, ${f(y1)}, ${f(x2)}, ${f(y2)}, ${f(edgeZ)}, edgeRadius);`);
     });
     lines.push(`}`);

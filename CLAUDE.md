@@ -67,6 +67,23 @@ extracted Three.js geometry. Parameters (`twistRadius`, `edgeRadius`,
 top so the user can tweak them without re-exporting. Each color group is
 its own `color(...) union {}` block.
 
+## Print orientation
+Three.js uses Y-up; printers / 3MF / OpenSCAD are Z-up. We use a true
+rotation (X +90°: `(x,y,z) → (x, yOffset-z, y)`), not the Y↔Z swap that
+earlier code used. Y↔Z swap is a *reflection* — it produces a mirror-
+imaged print, which is why the first export came out flipped. With the
+true rotation, winding is preserved (no triangle reversal needed) and the
+corkline (line 0) lands at the back of the bed, matching the editor's
+"top of screen" convention.
+
+## Bambu filament map
+The 3MF zip includes `Metadata/model_settings.config` mapping each object
+to a 1-based extruder index (plate=1, twist=2, prev=3, teth=4, lead=5,
+meet=6, post=7) so Bambu Studio assigns filaments automatically on load.
+The file is a Bambu extension — other slicers ignore unknown files in
+the zip, so the standard 3MF still loads cleanly elsewhere. User can
+remap extruders in the slicer UI.
+
 ## 3MF mesh hygiene
 Three.js primitives generate per-face split vertices (so each face can have
 its own normal/UV for sharp shading). That makes individual meshes look
