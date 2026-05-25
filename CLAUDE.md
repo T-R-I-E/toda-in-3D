@@ -28,9 +28,17 @@ at that same hoist.
 - a fast twist is a lead iff it has at least one more fast twist after it
   on its line. The hitch carries lead + meet always, and post once a third
   fast twist appears. Only the *last* fast on a line never hoists.
-- Lines are visually staggered by half a `twistSpacing` on alternating
-  parities, so a same-index twist on the line directly above is never at
-  the same X — every inter-line edge is diagonal by construction.
+- Each line carries its own `xShift` (mm). New lines default to an
+  alternating half-`twistSpacing` stagger so a same-index twist on the
+  line directly above is never at the same X — every inter-line edge is
+  diagonal by construction.
+- When `setFast`/`setTether` can't satisfy the up-left rule at the
+  current `xShift`, the engine searches for the minimum rightward shift
+  (in `twistSpacing` increments) that puts the source past the leftmost
+  upper-line twist, applies it, then revalidates every other tether and
+  hoist and re-auto-picks anything broken. If revalidation can't fix
+  everything, the whole change is rolled back (snapshot/restore over
+  `xShift` + all tether/hoist refs) and the operation is refused.
 
 ## Auto-pick
 - tether: walks up from the line directly above and picks the rightmost

@@ -11,9 +11,13 @@ import * as BGU from 'three/addons/utils/BufferGeometryUtils.js';
 const ids = { L: 1, t: 1 };
 const nid = (p) => `${p}${ids[p]++}`;
 
+function defaultXShift(lineIdx) {
+  return (lineIdx % 2) * (state.params.twistSpacing / 2);
+}
+
 const state = {
-  lines: [{ id: nid('L'), twists: [] }],   // top line first (corkline)
-  selection: null,                          // { kind: 'twist'|'line', id }
+  lines: [{ id: nid('L'), twists: [], xShift: 0 }],
+  selection: null,
   params: {
     plateThickness: 2,
     borderHeight:   0,
@@ -37,15 +41,15 @@ function indexTwists(s) {
   return m;
 }
 
-// Lines are visually staggered so adjacent rows never share an X position.
-// Alternating half-spacing offset is enough to guarantee non-vertical edges
-// for tether/lead/meet/post between any line and the one directly above.
-function lineXOffset(lineIdx) {
-  return (lineIdx % 2) * (state.params.twistSpacing / 2);
-}
-
+// Each line has an xShift (mm) that places its column zero on the X axis.
+// New lines default to an alternating ts/2 stagger so adjacent lines never
+// share an X position, but the rules engine is free to shift any line
+// further right when the user makes a constraint that wouldn't otherwise
+// fit (e.g. a fast twist on a line that's currently left of every twist
+// on the line above).
 function twistX(lineIdx, twistIdx) {
-  return lineXOffset(lineIdx) + twistIdx * state.params.twistSpacing;
+  const line = state.lines[lineIdx];
+  return (line?.xShift ?? 0) + twistIdx * state.params.twistSpacing;
 }
 
 // --------------------------------------------------------------- edges -----
@@ -119,24 +123,171 @@ function autoPickHoist(s, lineIdx, twistIdx) {
   return null;
 }
 
+function isHoistValid(s, lineIdx, twistIdx, hoistId) {
+  const idx = indexTwists(s);
+  const h = idx[hoistId];
+  if (!h) return false;
+  if (h.lineIdx >= lineIdx) return false;
+  const line = s.lines[lineIdx];
+  const fasts = line.twists.map((t, i) => ({ t, i })).filter((o) => isFast(o.t));
+  const pos = fasts.findIndex((o) => o.i === twistIdx);
+  if (pos < 0 || pos > fasts.length - 2) return false;
+  const selfX = twistX(lineIdx, twistIdx);
+  const meetX = twistX(lineIdx, fasts[pos + 1].i);
+  const hoistX = twistX(h.lineIdx, h.twistIdx);
+  if (hoistX <= selfX || hoistX <= meetX) return false;
+  if (pos + 2 < fasts.length) {
+    const postX = twistX(lineIdx, fasts[pos + 2].i);
+    if (hoistX >= postX) return false;
+  }
+  return true;
+}
+
 // After any structural change, re-evaluate which fast twists on `lineIdx`
-// are leads, and auto-pick a hoist for those that need one and don't have it.
-// A lead now requires only one more fast after it (the meet); post is added
-// automatically when a third fast appears (via deriveEdges).
+// are leads, validate their existing hoists, and auto-pick a new one when
+// needed. A lead requires only one more fast after it (the meet); post is
+// added automatically when a third fast appears (via deriveEdges).
 function recomputeHoists(s, lineIdx) {
   const line = s.lines[lineIdx];
   const fasts = line.twists.map((t, i) => ({ t, i })).filter((o) => isFast(o.t));
   fasts.forEach((o, fi) => {
     const shouldHaveHoist = fi <= fasts.length - 2;
     if (!shouldHaveHoist) { o.t.hoist = null; return; }
+    if (o.t.hoist && !isHoistValid(s, lineIdx, o.i, o.t.hoist)) o.t.hoist = null;
     if (!o.t.hoist) o.t.hoist = autoPickHoist(s, lineIdx, o.i);
   });
+}
+
+// ---- shift helpers ----
+
+function snapshotEdges() {
+  return state.lines.map((l) => ({
+    xShift: l.xShift,
+    twists: l.twists.map((t) => ({ tether: t.tether, hoist: t.hoist })),
+  }));
+}
+
+function restoreEdges(snap) {
+  state.lines.forEach((l, li) => {
+    l.xShift = snap[li].xShift;
+    l.twists.forEach((t, ti) => {
+      t.tether = snap[li].twists[ti].tether;
+      t.hoist = snap[li].twists[ti].hoist;
+    });
+  });
+}
+
+function isTetherValid(srcLineIdx, srcTwistIdx, tetherId) {
+  const tgt = indexTwists(state)[tetherId];
+  if (!tgt) return false;
+  if (tgt.lineIdx >= srcLineIdx) return false;
+  return twistX(tgt.lineIdx, tgt.twistIdx) < twistX(srcLineIdx, srcTwistIdx);
+}
+
+// Walk every twist; re-auto-pick any tether/hoist that's no longer valid
+// (e.g. because we just shifted a line). `protectedKeys` is a set of
+// "lineIdx:twistIdx" strings whose tether we must keep as-is (it's the
+// one we're trying to install). Returns true if everything could be
+// validated or repaired, false if any tether/hoist is broken and there's
+// no candidate to swap it for.
+function validateAndFix(protectedKeys = new Set()) {
+  for (let li = 0; li < state.lines.length; li++) {
+    const line = state.lines[li];
+    for (let ti = 0; ti < line.twists.length; ti++) {
+      const t = line.twists[ti];
+      if (!t.tether) continue;
+      if (isTetherValid(li, ti, t.tether)) continue;
+      if (protectedKeys.has(`${li}:${ti}`)) return false;
+      const repl = autoPickTether(state, li, ti);
+      if (!repl) return false;
+      t.tether = repl;
+    }
+  }
+  state.lines.forEach((_, li) => recomputeHoists(state, li));
+  return true;
+}
+
+// Make `twistId` fast, shifting its line right if no up-left tether
+// target exists at the current position. Returns true on success.
+function trySetFastWithShift(twistId) {
+  const info = indexTwists(state)[twistId];
+  if (!info || info.lineIdx === 0) return false;
+
+  // Try without shifting first.
+  let target = autoPickTether(state, info.lineIdx, info.twistIdx);
+  if (target) {
+    info.twist.tether = target;
+    recomputeHoists(state, info.lineIdx);
+    return true;
+  }
+
+  // No valid target at current X — find the leftmost upper-line X and
+  // shift this line in twistSpacing units until source.X exceeds it.
+  let minUpperX = Infinity;
+  for (let li = info.lineIdx - 1; li >= 0; li--) {
+    state.lines[li].twists.forEach((_, i) => {
+      minUpperX = Math.min(minUpperX, twistX(li, i));
+    });
+  }
+  if (minUpperX === Infinity) return false;
+
+  const ts = state.params.twistSpacing;
+  const line = info.line;
+  const oldShift = line.xShift ?? 0;
+  const baseSrcX = info.twistIdx * ts;
+  const required = minUpperX - baseSrcX + 1e-4;
+  const newShift = Math.max(oldShift + ts, Math.ceil(required / ts) * ts);
+
+  const snap = snapshotEdges();
+  line.xShift = newShift;
+  target = autoPickTether(state, info.lineIdx, info.twistIdx);
+  if (!target) { restoreEdges(snap); return false; }
+  info.twist.tether = target;
+  if (!validateAndFix(new Set([`${info.lineIdx}:${info.twistIdx}`]))) {
+    restoreEdges(snap);
+    return false;
+  }
+  return true;
+}
+
+// Set `twistId`'s tether to `targetId`, shifting the source line if
+// needed so the target ends up strictly up-left.
+function trySetTetherWithShift(twistId, targetId) {
+  const idx = indexTwists(state);
+  const src = idx[twistId], tgt = idx[targetId];
+  if (!src || !tgt) return false;
+  if (tgt.lineIdx >= src.lineIdx) return false;
+
+  const xS = twistX(src.lineIdx, src.twistIdx);
+  const xT = twistX(tgt.lineIdx, tgt.twistIdx);
+  if (xT < xS) {
+    src.twist.tether = targetId;
+    recomputeHoists(state, src.lineIdx);
+    return true;
+  }
+
+  const ts = state.params.twistSpacing;
+  const line = src.line;
+  const oldShift = line.xShift ?? 0;
+  const baseSrcX = src.twistIdx * ts;
+  const required = xT - baseSrcX + 1e-4;
+  const newShift = Math.max(oldShift + ts, Math.ceil(required / ts) * ts);
+
+  const snap = snapshotEdges();
+  line.xShift = newShift;
+  src.twist.tether = targetId;
+  if (!validateAndFix(new Set([`${src.lineIdx}:${src.twistIdx}`]))) {
+    restoreEdges(snap);
+    return false;
+  }
+  return true;
 }
 
 // ----------------------------------------------------------- mutations ----
 
 function addLine() {
-  state.lines.push({ id: nid('L'), twists: [] });
+  const li = state.lines.length;
+  state.lines.push({ id: nid('L'), twists: [], xShift: defaultXShift(li) });
 }
 
 function addTwistAtLine(lineIdx, atIdx = null) {
@@ -152,17 +303,21 @@ function setFast(twistId, fast) {
   const info = indexTwists(state)[twistId];
   if (!info) return;
   if (info.lineIdx === 0) { flash('Top line is always loose'); return; }
-  if (fast) {
-    if (!info.twist.tether) {
-      const t = autoPickTether(state, info.lineIdx, info.twistIdx);
-      if (!t) { flash('No twist above to tether to — add some first'); return; }
-      info.twist.tether = t;
-    }
-  } else {
+  if (!fast) {
     info.twist.tether = null;
     info.twist.hoist = null;
+    recomputeHoists(state, info.lineIdx);
+    return;
   }
-  recomputeHoists(state, info.lineIdx);
+  if (info.twist.tether) return;          // already fast
+  const oldShift = info.line.xShift;
+  if (!trySetFastWithShift(twistId)) {
+    flash('No twist above can serve as tether (even after shifting)');
+    return;
+  }
+  if (info.line.xShift !== oldShift) {
+    flash(`Shifted ${info.line.id} to fit`);
+  }
 }
 
 function setTether(twistId, targetId) {
@@ -170,11 +325,14 @@ function setTether(twistId, targetId) {
   const src = idx[twistId], tgt = idx[targetId];
   if (!src || !tgt) return;
   if (tgt.lineIdx >= src.lineIdx) { flash('Tether must point to a line above'); return; }
-  const xS = twistX(src.lineIdx, src.twistIdx);
-  const xT = twistX(tgt.lineIdx, tgt.twistIdx);
-  if (xT >= xS) { flash('Tether must go up-left (target must be left of source)'); return; }
-  src.twist.tether = targetId;
-  recomputeHoists(state, src.lineIdx);
+  const oldShift = src.line.xShift;
+  if (!trySetTetherWithShift(twistId, targetId)) {
+    flash('Cannot set tether — would break other constraints');
+    return;
+  }
+  if (src.line.xShift !== oldShift) {
+    flash(`Shifted ${src.line.id} to fit`);
+  }
 }
 
 function setHoist(twistId, targetId) {
@@ -993,8 +1151,10 @@ function applySnapshot(obj) {
   if (!obj || !Array.isArray(obj.lines) || obj.lines.length === 0) {
     throw new Error('missing or empty lines[]');
   }
-  state.lines = obj.lines.map((l) => ({
-    id: l.id, twists: (l.twists || []).map((t) => ({
+  state.lines = obj.lines.map((l, li) => ({
+    id: l.id,
+    xShift: typeof l.xShift === 'number' ? l.xShift : defaultXShift(li),
+    twists: (l.twists || []).map((t) => ({
       id: t.id, tether: t.tether || null, hoist: t.hoist || null,
     })),
   }));
