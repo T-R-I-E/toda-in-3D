@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODA Rig Designer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    font-family: system-ui, -apple-system, sans-serif; color: #ddd;
+    background: #1e1e2e; }
+
+  .app { display: grid; grid-template-rows: 56px 1fr 24px; height: 100vh; }
+
+  /* ---------- toolbar ---------- */
+  .toolbar { display: flex; align-items: center; gap: 8px; padding: 0 14px;
+    background: #2a2a3e; border-bottom: 1px solid #3a3a4e; }
+  .toolbar .brand { font-weight: 600; letter-spacing: .3px; margin-right: 8px; }
+  .toolbar .spacer { flex: 1; }
+  .toolbar button {
+    padding: 6px 12px; border: 1px solid #4a4a5e; background: #34344a;
+    color: #e0e0e8; border-radius: 6px; cursor: pointer; font-size: 12px;
+    font-family: inherit; }
+  .toolbar button:hover:not(:disabled) { background: #44446a; }
+  .toolbar button:disabled { opacity: .4; cursor: not-allowed; }
+  .toolbar button.primary { background: #4a5a8a; border-color: #6a7aaa; }
+  .toolbar button.primary:hover { background: #5a6aaa; }
+
+  /* ---------- main ---------- */
+  .main { display: grid; grid-template-columns: 1fr 360px; overflow: hidden;
+    min-height: 0; }
+
+  .editor-pane { background: #1a1a2e; position: relative; overflow: hidden; }
+  #editorSvg { width: 100%; height: 100%; display: block; cursor: default;
+    user-select: none; -webkit-user-select: none; }
+  .hint { position: absolute; bottom: 8px; left: 10px; color: #555;
+    font-size: 11px; line-height: 1.5; pointer-events: none; }
+  .hint kbd { font-family: ui-monospace, monospace; font-size: 10px;
+    color: #888; background: #2a2a3e; padding: 1px 4px; border-radius: 3px;
+    border: 1px solid #3a3a4e; }
+
+  .side-pane { display: grid; grid-template-rows: auto 1fr;
+    background: #232336; border-left: 1px solid #3a3a4e; min-height: 0; }
+  .params { padding: 12px 14px; border-bottom: 1px solid #3a3a4e;
+    overflow-y: auto; max-height: 50vh; }
+  .params h3 { margin: 0 0 8px 0; font-size: 11px; color: #888;
+    text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+  .params .row { display: grid; grid-template-columns: 90px 1fr 40px;
+    align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; }
+  .params .row label { color: #aaa; }
+  .params input[type=range] { width: 100%; accent-color: #daa520; }
+  .params .val { color: #daa520; font-variant-numeric: tabular-nums;
+    text-align: right; font-size: 11px; }
+
+  .preview-pane { position: relative; background: #1a1a2e; min-height: 0; }
+  #previewCanvas { display: block; width: 100%; height: 100%; }
+  .preview-tag { position: absolute; top: 6px; left: 8px; color: #555;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    pointer-events: none; }
+
+  /* ---------- status bar ---------- */
+  .status { display: flex; align-items: center; gap: 10px; padding: 0 14px;
+    background: #2a2a3e; border-top: 1px solid #3a3a4e; font-size: 11px;
+    color: #888; font-family: ui-monospace, monospace; }
+  .status .spacer { flex: 1; }
+  .status .legend { display: flex; gap: 10px; }
+  .status .legend .sw { display: inline-block; width: 10px; height: 2px;
+    margin-right: 4px; vertical-align: middle; }
+
+  /* ---------- svg editor styles ---------- */
+  .twist { stroke: #ccc; stroke-width: 1; cursor: pointer; }
+  .twist.loose { fill: #4a4a6e; }
+  .twist.fast  { fill: #e8e8f0; stroke: #fff; }
+  .twist:hover { stroke: #daa520; stroke-width: 1.6; }
+  .twist.selected { stroke: #daa520; stroke-width: 2.4; }
+  .twist.linkable:hover { stroke: #5dd; stroke-width: 2; }
+
+  .line-rail { stroke: #2a2a3e; stroke-width: 1; }
+  .line-label { fill: #555; font-size: 11px; font-family: ui-monospace, monospace;
+    cursor: pointer; user-select: none; }
+  .line-label:hover { fill: #888; }
+  .line-label.selected { fill: #daa520; }
+
+  .edge { fill: none; stroke-width: 2; pointer-events: none;
+    stroke-linecap: round; }
+  .edge.prev { stroke: #999; stroke-width: 1.5; }
+  .edge.teth { stroke: #f9f; }
+  .edge.lead { stroke: rgb(61,255,51); }
+  .edge.meet { stroke: #86f; }
+  .edge.post { stroke: rgb(255,174,60); }
+
+  .ghost-add { fill: #2a2a3e; stroke: #3a3a5e; stroke-dasharray: 3 3;
+    cursor: pointer; }
+  .ghost-add:hover { fill: #34344a; stroke: #5a5a8e; }
+  .ghost-plus { fill: #5a5a8e; font-size: 14px; pointer-events: none;
+    text-anchor: middle; dominant-baseline: central;
+    font-family: ui-monospace, monospace; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div class="app">
+
+  <header class="toolbar">
+    <span class="brand">TODA Rig &rarr; 3D</span>
+    <button id="btn-add-line" title="Add a new line below the existing ones">+ Line</button>
+    <button id="btn-add-twist" title="Add a twist to the selected line">+ Twist</button>
+    <button id="btn-toggle-fast" title="Toggle fast/loose on selected twist (F)">Fast/Loose</button>
+    <button id="btn-remove" title="Remove selected twist or line (Delete)">Remove</button>
+    <span class="spacer"></span>
+    <button id="btn-import">Import JSON</button>
+    <button id="btn-export-json">Export JSON</button>
+    <button id="btn-export-3mf" class="primary">Export .3mf</button>
+    <input type="file" id="file-input" accept=".json,application/json" hidden>
+  </header>
+
+  <div class="main">
+    <div class="editor-pane">
+      <svg id="editorSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="hint">
+        click a twist to select &middot;
+        <kbd>shift</kbd>-click a twist above to set <span style="color:#f9f">tether</span> &middot;
+        <kbd>alt</kbd>-click to set <span style="color:rgb(61,255,51)">hoist</span> &middot;
+        <kbd>F</kbd> toggle fast &middot;
+        <kbd>Del</kbd> remove
+      </div>
+    </div>
+
+    <aside class="side-pane">
+      <div class="params" id="params">
+        <h3>Geometry (mm)</h3>
+        <div class="row">
+          <label>plate thick</label>
+          <input type="range" data-p="plateThickness" min="0.5" max="6" step="0.1">
+          <span class="val" data-v="plateThickness"></span>
+        </div>
+        <div class="row">
+          <label>border h</label>
+          <input type="range" data-p="borderHeight" min="0" max="10" step="0.5">
+          <span class="val" data-v="borderHeight"></span>
+        </div>
+        <div class="row">
+          <label>border w</label>
+          <input type="range" data-p="borderWidth" min="0" max="8" step="0.5">
+          <span class="val" data-v="borderWidth"></span>
+        </div>
+        <div class="row">
+          <label>twist r</label>
+          <input type="range" data-p="twistRadius" min="1" max="10" step="0.2">
+          <span class="val" data-v="twistRadius"></span>
+        </div>
+        <div class="row">
+          <label>edge r</label>
+          <input type="range" data-p="edgeRadius" min="0.2" max="3" step="0.1">
+          <span class="val" data-v="edgeRadius"></span>
+        </div>
+        <h3 style="margin-top:14px">Layout</h3>
+        <div class="row">
+          <label>twist gap</label>
+          <input type="range" data-p="twistSpacing" min="8" max="32" step="1">
+          <span class="val" data-v="twistSpacing"></span>
+        </div>
+        <div class="row">
+          <label>line gap</label>
+          <input type="range" data-p="lineSpacing" min="14" max="48" step="1">
+          <span class="val" data-v="lineSpacing"></span>
+        </div>
+      </div>
+
+      <div class="preview-pane">
+        <canvas id="previewCanvas"></canvas>
+        <div class="preview-tag">3D preview</div>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="status">
+    <span id="status-info">—</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><span class="sw" style="background:#999"></span>prev</span>
+      <span><span class="sw" style="background:#f9f"></span>teth</span>
+      <span><span class="sw" style="background:rgb(61,255,51)"></span>lead</span>
+      <span><span class="sw" style="background:#86f"></span>meet</span>
+      <span><span class="sw" style="background:rgb(255,174,60)"></span>post</span>
+    </span>
+  </footer>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
