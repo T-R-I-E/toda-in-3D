@@ -7,11 +7,26 @@ exporting a 3D-printable `.3mf` file. No backend, no build step. Open
 
 ## Layout
 - `index.html` — markup + CSS only. Loads Three.js + OrbitControls from
-  jsdelivr via importmap.
+  jsdelivr via importmap. Dark/light theme via `html.theme-dark` /
+  `html.theme-light` classes; an inline script at the top of `<head>`
+  sets the class from `localStorage['toda3d.theme']` before the
+  stylesheet applies to avoid FOUC.
 - `app.js` — all logic. Sections (see banner comments):
   state · edges · auto-pick · mutations · 2D editor (SVG) · 3D scene
-  (Three.js) · 3MF export (stored-mode ZIP + CRC32 + 3MF XML) · JSON I/O ·
-  params · toolbar · init.
+  (Three.js, transparent so the panel-body lens vignette shows
+  through) · 3MF export (stored-mode ZIP + CRC32 + 3MF XML) · JSON I/O ·
+  params · toolbar · init · theme toggle · controls fade.
+
+## UI conventions
+- Two equal panels (red lens = 2D editor, blue lens = 3D preview),
+  horizontal slider bar below them, status chips + legend at the
+  bottom.
+- Edge colors stay on the rigging-workshop palette
+  (`--rig-prev/teth/lead/meet/post`) — they're tied to data semantics
+  and to the print output, so they don't change with theme.
+- The Fast/Loose pill reflects the selected twist's state (green dot
+  when fast, idle when loose or no selection). Clicking it toggles
+  fast on that twist.
 
 ## Data model
 A rig is just `{ lines: [{ id, twists: [{ id, tether?, hoist? }] }] }`.

@@ -527,11 +527,12 @@ function onTwistClick(ev, twistId) {
 
 const cv = document.getElementById('previewCanvas');
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1a2e);
+scene.background = null;  // transparent so the panel-body gradient shows through
 
 const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 2000);
-const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
 renderer.setPixelRatio(devicePixelRatio);
+renderer.setClearColor(0x000000, 0);
 
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.enableDamping = true;
@@ -1205,6 +1206,9 @@ function restoreSession() {
 function syncParamInputs() {
   document.querySelectorAll('[data-p]').forEach((el) => {
     el.value = state.params[el.dataset.p];
+    const min = +el.min, max = +el.max;
+    const pct = max > min ? ((+el.value - min) / (max - min)) * 100 : 0;
+    el.style.setProperty('--pct', pct + '%');
   });
   document.querySelectorAll('[data-v]').forEach((el) => {
     const v = state.params[el.dataset.v];
@@ -1225,23 +1229,54 @@ function bindParams() {
 
 // ------------------------------------------------------------ toolbar ----
 
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 function flash(msg) {
-  const el = document.getElementById('status-info');
+  const el = document.getElementById('status-left');
   if (!el) return;
   el.dataset.flashing = '1';
-  el.textContent = msg;
+  el.innerHTML = `<span class="status-chip">${esc(msg)}</span>`;
   clearTimeout(flash._t);
   flash._t = setTimeout(() => { delete el.dataset.flashing; updateStatus(); }, 2200);
 }
 
 function updateStatus() {
-  const el = document.getElementById('status-info');
-  if (!el || el.dataset.flashing) return;
-  const counts = state.lines.map((l, i) => `L${i}:${l.twists.length}`).join(' ');
-  const sel = state.selection
-    ? `sel=${state.selection.kind}:${state.selection.id}`
-    : 'no selection';
-  el.textContent = `${state.lines.length} line${state.lines.length === 1 ? '' : 's'}  ${counts}  ·  ${sel}`;
+  const left = document.getElementById('status-left');
+  const meta = document.getElementById('panel-meta-editor');
+  if (meta) {
+    meta.textContent = state.lines.length
+      ? state.lines.map((l, i) => `L${i}:${l.twists.length}`).join(' · ')
+      : '—';
+  }
+  if (left && !left.dataset.flashing) {
+    const n = state.lines.length;
+    const chip = `<span class="status-chip">${n} line${n === 1 ? '' : 's'}</span>`;
+    const sel = state.selection
+      ? `<span class="status-dot">·</span><span class="status-piece">sel=<span class="status-sel">${esc(state.selection.kind)}:${esc(state.selection.id)}</span></span>`
+      : '';
+    left.innerHTML = chip + sel;
+  }
+  updateFastPill();
+}
+
+function updateFastPill() {
+  const pill = document.getElementById('fast-pill');
+  const label = document.getElementById('fast-label');
+  if (!pill || !label) return;
+  if (state.selection?.kind === 'twist') {
+    const info = indexTwists(state)[state.selection.id];
+    if (info && isFast(info.twist)) {
+      pill.classList.add('on');
+      label.textContent = 'Fast';
+      return;
+    }
+    pill.classList.remove('on');
+    label.textContent = 'Loose';
+    return;
+  }
+  pill.classList.remove('on');
+  label.textContent = 'Fast / Loose';
 }
 
 function rerender() {
@@ -1330,3 +1365,38 @@ tick();
 // The camera changes during orbiting (which does not call rerender), so
 // flush one more save right before unload to capture the latest view.
 window.addEventListener('beforeunload', saveSession);
+
+// ---- theme toggle ----
+{
+  const SUN  = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>';
+  const MOON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M11.4 10.4A5.2 5.2 0 0 1 5 4a5 5 0 0 0-.7 9.4 5.2 5.2 0 0 0 7.1-3z"/></svg>';
+  const root = document.documentElement;
+  const icon = document.getElementById('theme-toggle-icon');
+  function setTheme(t) {
+    root.classList.remove('theme-dark', 'theme-light');
+    root.classList.add('theme-' + t);
+    if (icon) icon.innerHTML = t === 'light' ? SUN : MOON;
+    try { localStorage.setItem('toda3d.theme', t); } catch (_) {}
+  }
+  const current = root.classList.contains('theme-light') ? 'light' : 'dark';
+  setTheme(current);
+  document.getElementById('theme-toggle')?.addEventListener('click', () => {
+    setTheme(root.classList.contains('theme-light') ? 'dark' : 'light');
+  });
+}
+
+// ---- controls strip scroll affordance ----
+{
+  const controls = document.getElementById('params');
+  const fade = document.getElementById('controls-fade');
+  if (controls && fade) {
+    const syncFade = () => {
+      const atEnd = controls.scrollLeft + controls.clientWidth >= controls.scrollWidth - 4;
+      fade.classList.toggle('hidden', atEnd);
+    };
+    controls.addEventListener('scroll', syncFade);
+    new ResizeObserver(syncFade).observe(controls);
+    fade.addEventListener('click', () => controls.scrollBy({ left: 200, behavior: 'smooth' }));
+    syncFade();
+  }
+}
