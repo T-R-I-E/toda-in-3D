@@ -59,6 +59,16 @@ rig is much larger or smaller than the default, the user orbits/zooms.
 - 3MF export: Y↔Z swap (3MF/print is Z-up), triangle winding reversed
   to keep outward normals after the handedness flip
 
+## 3MF mesh hygiene
+Three.js primitives generate per-face split vertices (so each face can have
+its own normal/UV for sharp shading). That makes individual meshes look
+right in the viewport but reports as non-manifold to slicers (Bambu Studio
+flagged "2910 non-manifold edges" on an early export). `extractMesh`
+rebuilds a position-only copy of each mesh and runs `mergeVertices`
+before extracting — the scene keeps its sharp shading, the 3MF is
+watertight. The plate is its own clean closed box; cylinder edges are
+lifted so they rest on the plate's top surface, never dip below it.
+
 ## Git policy (overrides global)
 You manage git directly in this project. The global "manual git" rule does
 NOT apply here. `git push` remains denied at the permission layer; the user

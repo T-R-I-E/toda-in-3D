@@ -139,10 +139,12 @@ function addLine() {
   state.lines.push({ id: nid('L'), twists: [] });
 }
 
-function addTwistAtLine(lineIdx) {
+function addTwistAtLine(lineIdx, atIdx = null) {
   if (lineIdx < 0 || lineIdx >= state.lines.length) return null;
   const id = nid('t');
-  state.lines[lineIdx].twists.push({ id });
+  const twists = state.lines[lineIdx].twists;
+  if (atIdx == null || atIdx >= twists.length) twists.push({ id });
+  else twists.splice(atIdx, 0, { id });
   return id;
 }
 
@@ -318,6 +320,7 @@ function renderEditor() {
       const c1 = svg('circle', {
         cx: c.x, cy: c.y, r,
         class: cls.join(' '),
+        'data-twist': t.id,
       }, twistsG);
       c1.addEventListener('click', (ev) => {
         ev.stopPropagation();
@@ -412,12 +415,11 @@ function disposeGroup(g) {
 
 // Closed (capped) hemisphere: dome + disk at base.
 // SphereGeometry's top hemisphere has its flat at Y=0, dome above. The cap
-// is a CircleGeometry rotated so its normal points -Y (away from the dome),
-// closing the hemisphere into a manifold solid.
+// is a CircleGeometry rotated so its normal points -Y (away from the dome).
 function hemisphereGeom(radius, segs = 24) {
   const dome = new THREE.SphereGeometry(radius, segs, Math.max(8, segs / 2), 0, Math.PI * 2, 0, Math.PI / 2);
   const cap = new THREE.CircleGeometry(radius, segs);
-  cap.rotateX(Math.PI / 2);   // disk now in XZ plane, normal -Y (outward, since dome is +Y)
+  cap.rotateX(Math.PI / 2);
   return BGU.mergeGeometries([dome, cap], false) || dome;
 }
 
@@ -515,7 +517,10 @@ function buildScene() {
   Object.entries(EDGE_COLOR).forEach(([k, c]) => {
     edgeMats[k] = new THREE.MeshLambertMaterial({ color: c });
   });
-  const edgeLift = Math.max(0.3, p.edgeRadius * 0.5);
+  // Lift cylinder centers by edgeRadius so the cylinder bottom rests on
+  // the plate top instead of dipping below it. This keeps the plate free
+  // of internal geometry (so it can be printed as a clean solid).
+  const edgeLift = p.edgeRadius;
   deriveEdges(state).forEach((e) => {
     const a = worldPos(e.from, idx); const b = worldPos(e.to, idx);
     if (!a || !b) return;
@@ -542,6 +547,22 @@ function initCamera() {
   camera.position.set(target.x, target.y + dist * 0.7, target.z + dist * 0.9);
   orbit.target.copy(target);
   orbit.update();
+}
+
+function snapshotCamera() {
+  return {
+    pos: [camera.position.x, camera.position.y, camera.position.z],
+    target: [orbit.target.x, orbit.target.y, orbit.target.z],
+  };
+}
+
+function applyCamera(c) {
+  if (!c || !Array.isArray(c.pos) || c.pos.length !== 3) return false;
+  if (!Array.isArray(c.target) || c.target.length !== 3) return false;
+  camera.position.set(c.pos[0], c.pos[1], c.pos[2]);
+  orbit.target.set(c.target[0], c.target[1], c.target[2]);
+  orbit.update();
+  return true;
 }
 
 function resize3D() {
@@ -643,19 +664,29 @@ function buildZip(entries) {
   return out;
 }
 
-// Three.js mesh -> {verts, tris} with Y/Z swap (Three Y-up -> 3MF Z-up) and
-// reversed winding to keep outward normals correct after the handedness flip.
+// Three.js mesh -> {verts, tris} for 3MF export.
+// Three.js primitives split vertices at face seams (so each face can have
+// its own normal/UV for sharp rendering); the rendered scene wants that,
+// but a 3MF needs a watertight manifold. We rebuild a position-only copy
+// of the geometry and weld vertices by position before extracting.
+// Y/Z swap (Three Y-up -> 3MF Z-up) and reversed winding keep outward
+// normals correct after the handedness flip.
 function extractMesh(threeMesh) {
-  const geom = threeMesh.geometry;
+  const original = threeMesh.geometry;
+  const stripped = new THREE.BufferGeometry();
+  stripped.setAttribute('position', original.getAttribute('position').clone());
+  if (original.index) stripped.setIndex(original.index.clone());
+  const welded = BGU.mergeVertices(stripped, 1e-4);
+
   threeMesh.updateMatrixWorld(true);
   const M = threeMesh.matrixWorld;
-  const pos = geom.attributes.position;
-  const idxAttr = geom.index;
+  const pos = welded.attributes.position;
+  const idxAttr = welded.index;
   const verts = [];
   const tmp = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
     tmp.fromBufferAttribute(pos, i).applyMatrix4(M);
-    verts.push([tmp.x, tmp.z, tmp.y]); // y<->z
+    verts.push([tmp.x, tmp.z, tmp.y]);
   }
   const tris = [];
   if (idxAttr) {
@@ -665,6 +696,8 @@ function extractMesh(threeMesh) {
   } else {
     for (let i = 0; i < pos.count; i += 3) tris.push([i, i + 2, i + 1]);
   }
+  welded.dispose();
+  stripped.dispose();
   return { verts, tris };
 }
 
@@ -770,14 +803,19 @@ function download(blob, name) {
 
 // ------------------------------------------------------------ JSON I/O ----
 
-function exportJson() {
-  const data = JSON.stringify({
+function snapshot() {
+  return {
     version: 1,
     ids,
     lines: state.lines,
     params: state.params,
-  }, null, 2);
-  download(new Blob([data], { type: 'application/json' }), 'rig.json');
+    camera: snapshotCamera(),
+  };
+}
+
+function exportJson() {
+  download(new Blob([JSON.stringify(snapshot(), null, 2)],
+    { type: 'application/json' }), 'rig.json');
 }
 
 function applySnapshot(obj) {
@@ -792,6 +830,7 @@ function applySnapshot(obj) {
   if (obj.params) Object.assign(state.params, obj.params);
   if (obj.ids) Object.assign(ids, obj.ids);
   state.selection = null;
+  return applyCamera(obj.camera);
 }
 
 function importJson(file) {
@@ -815,20 +854,18 @@ const STORAGE_KEY = 'toda-rig-designer:v1';
 
 function saveSession() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      version: 1, ids, lines: state.lines, params: state.params,
-    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot()));
   } catch (_) { /* quota/disabled — fall through silently */ }
 }
 
 function restoreSession() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return false;
-    applySnapshot(JSON.parse(raw));
-    return true;
+    if (!raw) return { restored: false, cameraRestored: false };
+    const cameraRestored = applySnapshot(JSON.parse(raw));
+    return { restored: true, cameraRestored };
   } catch (_) {
-    return false;
+    return { restored: false, cameraRestored: false };
   }
 }
 
@@ -889,10 +926,16 @@ document.getElementById('btn-add-line').addEventListener('click', () => {
 });
 
 document.getElementById('btn-add-twist').addEventListener('click', () => {
-  let li = state.lines.length - 1;
   if (state.selection?.kind === 'twist') {
-    li = indexTwists(state)[state.selection.id]?.lineIdx ?? li;
-  } else if (state.selection?.kind === 'line') {
+    const info = indexTwists(state)[state.selection.id];
+    if (info) {
+      addTwistAtLine(info.lineIdx, info.twistIdx + 1);
+      rerender();
+      return;
+    }
+  }
+  let li = state.lines.length - 1;
+  if (state.selection?.kind === 'line') {
     li = state.lines.findIndex((l) => l.id === state.selection.id);
   }
   addTwistAtLine(li);
@@ -945,9 +988,13 @@ window.addEventListener('keydown', (ev) => {
 
 // ---------------------------------------------------------------- init ----
 
-restoreSession();
+const session = restoreSession();
+if (!session.cameraRestored) initCamera();
 bindParams();
-initCamera();
 rerender();
 resize3D();
 tick();
+
+// The camera changes during orbiting (which does not call rerender), so
+// flush one more save right before unload to capture the latest view.
+window.addEventListener('beforeunload', saveSession);

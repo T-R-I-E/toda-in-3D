@@ -10,7 +10,7 @@
     font-family: system-ui, -apple-system, sans-serif; color: #ddd;
     background: #1e1e2e; }
 
-  .app { display: grid; grid-template-rows: 56px 1fr 24px; height: 100vh; }
+  .app { display: grid; grid-template-rows: 56px 1fr auto 24px; height: 100vh; }
 
   /* ---------- toolbar ---------- */
   .toolbar { display: flex; align-items: center; gap: 8px; padding: 0 14px;
@@ -27,10 +27,11 @@
   .toolbar button.primary:hover { background: #5a6aaa; }
 
   /* ---------- main ---------- */
-  .main { display: grid; grid-template-columns: 1fr 360px; overflow: hidden;
+  .main { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden;
     min-height: 0; }
 
-  .editor-pane { background: #1a1a2e; position: relative; overflow: hidden; }
+  .editor-pane { background: #1a1a2e; position: relative; overflow: hidden;
+    border-right: 1px solid #2a2a3e; }
   #editorSvg { width: 100%; height: 100%; display: block; cursor: default;
     user-select: none; -webkit-user-select: none; }
   .hint { position: absolute; bottom: 8px; left: 10px; color: #555;
@@ -39,24 +40,27 @@
     color: #888; background: #2a2a3e; padding: 1px 4px; border-radius: 3px;
     border: 1px solid #3a3a4e; }
 
-  .side-pane { display: grid; grid-template-rows: auto 1fr;
-    background: #232336; border-left: 1px solid #3a3a4e; min-height: 0; }
-  .params { padding: 12px 14px; border-bottom: 1px solid #3a3a4e;
-    overflow-y: auto; max-height: 50vh; }
-  .params h3 { margin: 0 0 8px 0; font-size: 11px; color: #888;
-    text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
-  .params .row { display: grid; grid-template-columns: 90px 1fr 40px;
-    align-items: center; gap: 8px; margin-bottom: 5px; font-size: 12px; }
-  .params .row label { color: #aaa; }
-  .params input[type=range] { width: 100%; accent-color: #daa520; }
-  .params .val { color: #daa520; font-variant-numeric: tabular-nums;
-    text-align: right; font-size: 11px; }
-
   .preview-pane { position: relative; background: #1a1a2e; min-height: 0; }
   #previewCanvas { display: block; width: 100%; height: 100%; }
   .preview-tag { position: absolute; top: 6px; left: 8px; color: #555;
     font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
     pointer-events: none; }
+
+  /* ---------- params bar (under the two panels) ---------- */
+  .params-bar { display: flex; flex-wrap: wrap; align-items: center;
+    gap: 6px 18px; padding: 10px 16px;
+    background: #232336; border-top: 1px solid #3a3a4e;
+    border-bottom: 1px solid #3a3a4e; }
+  .params-bar .section { font-size: 10px; color: #888;
+    text-transform: uppercase; letter-spacing: 1px; font-weight: 600;
+    margin-right: 4px; }
+  .params-bar .param { display: flex; align-items: center; gap: 8px;
+    font-size: 11px; }
+  .params-bar .param label { color: #aaa; }
+  .params-bar input[type=range] { width: 110px; accent-color: #daa520;
+    vertical-align: middle; }
+  .params-bar .val { color: #daa520; font-variant-numeric: tabular-nums;
+    font-size: 11px; min-width: 28px; text-align: right; }
 
   /* ---------- status bar ---------- */
   .status { display: flex; align-items: center; gap: 10px; padding: 0 14px;
@@ -133,52 +137,50 @@
       </div>
     </div>
 
-    <aside class="side-pane">
-      <div class="params" id="params">
-        <h3>Geometry (mm)</h3>
-        <div class="row">
-          <label>plate thick</label>
-          <input type="range" data-p="plateThickness" min="0.5" max="6" step="0.1">
-          <span class="val" data-v="plateThickness"></span>
-        </div>
-        <div class="row">
-          <label>border h</label>
-          <input type="range" data-p="borderHeight" min="0" max="10" step="0.5">
-          <span class="val" data-v="borderHeight"></span>
-        </div>
-        <div class="row">
-          <label>border w</label>
-          <input type="range" data-p="borderWidth" min="0" max="8" step="0.5">
-          <span class="val" data-v="borderWidth"></span>
-        </div>
-        <div class="row">
-          <label>twist r</label>
-          <input type="range" data-p="twistRadius" min="1" max="10" step="0.2">
-          <span class="val" data-v="twistRadius"></span>
-        </div>
-        <div class="row">
-          <label>edge r</label>
-          <input type="range" data-p="edgeRadius" min="0.2" max="3" step="0.1">
-          <span class="val" data-v="edgeRadius"></span>
-        </div>
-        <h3 style="margin-top:14px">Layout</h3>
-        <div class="row">
-          <label>twist gap</label>
-          <input type="range" data-p="twistSpacing" min="8" max="32" step="1">
-          <span class="val" data-v="twistSpacing"></span>
-        </div>
-        <div class="row">
-          <label>line gap</label>
-          <input type="range" data-p="lineSpacing" min="14" max="48" step="1">
-          <span class="val" data-v="lineSpacing"></span>
-        </div>
-      </div>
+    <div class="preview-pane">
+      <canvas id="previewCanvas"></canvas>
+      <div class="preview-tag">3D preview</div>
+    </div>
+  </div>
 
-      <div class="preview-pane">
-        <canvas id="previewCanvas"></canvas>
-        <div class="preview-tag">3D preview</div>
-      </div>
-    </aside>
+  <div class="params-bar" id="params">
+    <span class="section">Geometry (mm)</span>
+    <div class="param">
+      <label>plate</label>
+      <input type="range" data-p="plateThickness" min="0.5" max="6" step="0.1">
+      <span class="val" data-v="plateThickness"></span>
+    </div>
+    <div class="param">
+      <label>border h</label>
+      <input type="range" data-p="borderHeight" min="0" max="10" step="0.5">
+      <span class="val" data-v="borderHeight"></span>
+    </div>
+    <div class="param">
+      <label>border w</label>
+      <input type="range" data-p="borderWidth" min="0" max="8" step="0.5">
+      <span class="val" data-v="borderWidth"></span>
+    </div>
+    <div class="param">
+      <label>twist r</label>
+      <input type="range" data-p="twistRadius" min="1" max="10" step="0.2">
+      <span class="val" data-v="twistRadius"></span>
+    </div>
+    <div class="param">
+      <label>edge r</label>
+      <input type="range" data-p="edgeRadius" min="0.2" max="3" step="0.1">
+      <span class="val" data-v="edgeRadius"></span>
+    </div>
+    <span class="section">Layout</span>
+    <div class="param">
+      <label>twist gap</label>
+      <input type="range" data-p="twistSpacing" min="8" max="32" step="1">
+      <span class="val" data-v="twistSpacing"></span>
+    </div>
+    <div class="param">
+      <label>line gap</label>
+      <input type="range" data-p="lineSpacing" min="14" max="48" step="1">
+      <span class="val" data-v="lineSpacing"></span>
+    </div>
   </div>
 
   <footer class="status">
