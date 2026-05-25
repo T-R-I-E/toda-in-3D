@@ -59,6 +59,14 @@ rig is much larger or smaller than the default, the user orbits/zooms.
 - 3MF export: Y↔Z swap (3MF/print is Z-up), triangle winding reversed
   to keep outward normals after the handedness flip
 
+## SCAD export
+`exportScad()` emits an OpenSCAD `.scad` using primitives (cube plate,
+hemispheres as `sphere ∩ slab`, edges as `hull()` of two spheres) — not
+extracted Three.js geometry. Parameters (`twistRadius`, `edgeRadius`,
+`plateThick`, optional `borderH/W`) are emitted as SCAD variables at the
+top so the user can tweak them without re-exporting. Each color group is
+its own `color(...) union {}` block.
+
 ## 3MF mesh hygiene
 Three.js primitives generate per-face split vertices (so each face can have
 its own normal/UV for sharp shading). That makes individual meshes look

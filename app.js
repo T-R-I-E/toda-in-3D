@@ -793,6 +793,136 @@ function export3mf() {
   flash(`Exported ${totalTris} triangles to rig.3mf`);
 }
 
+// ----------------------------------------------------------- SCAD export ----
+
+// Three is Y-up; OpenSCAD is Z-up. Map: scad.x = three.x, scad.y = three.z,
+// scad.z = three.y. We compute geometry directly in SCAD space here (no
+// per-vertex swap needed — we just use the right axes when emitting).
+const SCAD_EDGE_COLOR = {
+  prev: [0.60, 0.60, 0.60],
+  teth: [1.00, 0.60, 1.00],
+  lead: [0.24, 1.00, 0.20],
+  meet: [0.53, 0.40, 1.00],
+  post: [1.00, 0.68, 0.24],
+};
+
+function exportScad() {
+  const p = state.params;
+  const idx = indexTwists(state);
+  const f = (n) => (Math.round(n * 1000) / 1000).toString();
+
+  // Plate bounds — same as buildScene.
+  let minX = 0, maxX = 0, maxY = 0;
+  state.lines.forEach((line, li) => {
+    if (line.twists.length) {
+      maxX = Math.max(maxX, twistX(li, line.twists.length - 1));
+      minX = Math.min(minX, twistX(li, 0));
+    }
+    maxY = Math.max(maxY, li * p.lineSpacing);
+  });
+  const margin = Math.max(p.twistRadius * 2.2, 6);
+  const plateW = (maxX - minX) + margin * 2;
+  const plateD = maxY + margin * 2;
+  const plateX0 = (minX + maxX) / 2 - plateW / 2;
+  const plateY0 = maxY / 2 - plateD / 2;
+
+  const lines = [];
+  lines.push(`// TODA rig — exported ${new Date().toISOString()}`);
+  lines.push(`// Open in OpenSCAD. Render with F6 to export STL/3MF.`);
+  lines.push(``);
+  lines.push(`$fn = 32;`);
+  lines.push(``);
+  lines.push(`twistRadius = ${f(p.twistRadius)};`);
+  lines.push(`edgeRadius  = ${f(p.edgeRadius)};`);
+  lines.push(`plateThick  = ${f(p.plateThickness)};`);
+  if (p.borderHeight > 0 && p.borderWidth > 0) {
+    lines.push(`borderH     = ${f(p.borderHeight)};`);
+    lines.push(`borderW     = ${f(p.borderWidth)};`);
+  }
+  lines.push(``);
+  lines.push(`// Hemisphere sitting flat on Z=z, dome up.`);
+  lines.push(`module hemi(x, y, z, r) {`);
+  lines.push(`  translate([x, y, z]) intersection() {`);
+  lines.push(`    sphere(r=r);`);
+  lines.push(`    translate([-r, -r, 0]) cube([2*r, 2*r, r]);`);
+  lines.push(`  }`);
+  lines.push(`}`);
+  lines.push(``);
+  lines.push(`// Capsule edge between two 3D points (hull of two spheres).`);
+  lines.push(`module edge(x1, y1, x2, y2, z, r) {`);
+  lines.push(`  hull() {`);
+  lines.push(`    translate([x1, y1, z]) sphere(r=r);`);
+  lines.push(`    translate([x2, y2, z]) sphere(r=r);`);
+  lines.push(`  }`);
+  lines.push(`}`);
+  lines.push(``);
+
+  // Plate
+  lines.push(`// ---- baseplate ----`);
+  lines.push(`color([0.87, 0.87, 0.87])`);
+  lines.push(`  translate([${f(plateX0)}, ${f(plateY0)}, 0])`);
+  lines.push(`    cube([${f(plateW)}, ${f(plateD)}, plateThick]);`);
+  lines.push(``);
+
+  // Optional border frame
+  if (p.borderHeight > 0 && p.borderWidth > 0) {
+    const bw = p.borderWidth, bh = p.borderHeight;
+    lines.push(`// ---- border ----`);
+    lines.push(`color([0.87, 0.87, 0.87])`);
+    lines.push(`  translate([0, 0, plateThick]) union() {`);
+    // North
+    lines.push(`    translate([${f(plateX0)}, ${f(plateY0)}, 0]) cube([${f(plateW)}, ${f(bw)}, ${f(bh)}]);`);
+    // South
+    lines.push(`    translate([${f(plateX0)}, ${f(plateY0 + plateD - bw)}, 0]) cube([${f(plateW)}, ${f(bw)}, ${f(bh)}]);`);
+    // West
+    lines.push(`    translate([${f(plateX0)}, ${f(plateY0 + bw)}, 0]) cube([${f(bw)}, ${f(plateD - 2 * bw)}, ${f(bh)}]);`);
+    // East
+    lines.push(`    translate([${f(plateX0 + plateW - bw)}, ${f(plateY0 + bw)}, 0]) cube([${f(bw)}, ${f(plateD - 2 * bw)}, ${f(bh)}]);`);
+    lines.push(`  }`);
+    lines.push(``);
+  }
+
+  // Twists (hemispheres)
+  lines.push(`// ---- twists ----`);
+  lines.push(`color([1, 1, 1]) union() {`);
+  state.lines.forEach((line, li) => {
+    line.twists.forEach((t, ti) => {
+      const x = twistX(li, ti);
+      const y = li * p.lineSpacing;
+      lines.push(`  hemi(${f(x)}, ${f(y)}, plateThick, twistRadius);`);
+    });
+  });
+  lines.push(`}`);
+  lines.push(``);
+
+  // Edges, grouped by type so each color is one union.
+  const byType = { prev: [], teth: [], lead: [], meet: [], post: [] };
+  deriveEdges(state).forEach((e) => { byType[e.type]?.push(e); });
+  const edgeZ = p.plateThickness + p.edgeRadius;
+  ['prev', 'teth', 'lead', 'meet', 'post'].forEach((type) => {
+    const es = byType[type];
+    if (!es || es.length === 0) return;
+    const [r, g, b] = SCAD_EDGE_COLOR[type];
+    lines.push(`// ---- ${type} ----`);
+    lines.push(`color([${f(r)}, ${f(g)}, ${f(b)}]) union() {`);
+    es.forEach((e) => {
+      const a = idx[e.from], bb = idx[e.to];
+      if (!a || !bb) return;
+      const x1 = twistX(a.lineIdx, a.twistIdx);
+      const y1 = a.lineIdx * p.lineSpacing;
+      const x2 = twistX(bb.lineIdx, bb.twistIdx);
+      const y2 = bb.lineIdx * p.lineSpacing;
+      lines.push(`  edge(${f(x1)}, ${f(y1)}, ${f(x2)}, ${f(y2)}, ${f(edgeZ)}, edgeRadius);`);
+    });
+    lines.push(`}`);
+    lines.push(``);
+  });
+
+  const scad = lines.join('\n');
+  download(new Blob([scad], { type: 'application/x-openscad' }), 'rig.scad');
+  flash(`Exported rig.scad (${scad.length} bytes)`);
+}
+
 function download(blob, name) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -967,6 +1097,7 @@ document.getElementById('file-input').addEventListener('change', (ev) => {
   ev.target.value = '';
 });
 document.getElementById('btn-export-json').addEventListener('click', exportJson);
+document.getElementById('btn-export-scad').addEventListener('click', exportScad);
 document.getElementById('btn-export-3mf').addEventListener('click', export3mf);
 
 window.addEventListener('keydown', (ev) => {
