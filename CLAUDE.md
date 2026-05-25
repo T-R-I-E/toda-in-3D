@@ -23,16 +23,28 @@ at that same hoist.
 
 ## Constraints (auto-enforced at edit time)
 - topmost line (`L1 (cork)`) holds only loose twists
-- tether and post go up-left, lead and meet go up-right
-- a fast twist is a lead iff it has at least two fast twists after it
-  on its line; the *last two* fast twists carry tether but no hoist
+- tether and post go up-left, lead and meet go up-right (strict — no
+  vertical edges; `setTether`/`setHoist` reject equal-X targets)
+- a fast twist is a lead iff it has at least one more fast twist after it
+  on its line. The hitch carries lead + meet always, and post once a third
+  fast twist appears. Only the *last* fast on a line never hoists.
+- Lines are visually staggered by half a `twistSpacing` on alternating
+  parities, so a same-index twist on the line directly above is never at
+  the same X — every inter-line edge is diagonal by construction.
 
 ## Auto-pick
-- tether: when toggling fast, picks the rightmost twist on the line
-  directly above with `index < self.index`; falls back further up if
-  the directly-above line is empty
-- hoist: for a lead, picks a twist on the line above with index strictly
-  between meet's and post's indices; falls back to the closest by distance
+- tether: walks up from the line directly above and picks the rightmost
+  twist whose X < source X (strict — guarantees up-left)
+- hoist: picks a twist on the line above with X strictly > meet X and (if
+  a post exists) < post X. If no twist on the line above satisfies the
+  bracket, the auto-pick returns null and no hoist edge is drawn until
+  the user adds a candidate or alt-clicks one manually.
+
+## Camera
+`initCamera()` runs once on page load and sizes the view for a typical
+~10-twist × ~4-line rig. After that, the camera is owned by the user
+(OrbitControls) — no auto re-fit on graph changes or JSON import. If a
+rig is much larger or smaller than the default, the user orbits/zooms.
 
 ## Coordinate convention
 - Three.js scene: Y up, X = horizontal along a line, Z = across lines

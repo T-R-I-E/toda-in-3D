@@ -37,6 +37,17 @@ function indexTwists(s) {
   return m;
 }
 
+// Lines are visually staggered so adjacent rows never share an X position.
+// Alternating half-spacing offset is enough to guarantee non-vertical edges
+// for tether/lead/meet/post between any line and the one directly above.
+function lineXOffset(lineIdx) {
+  return (lineIdx % 2) * (state.params.twistSpacing / 2);
+}
+
+function twistX(lineIdx, twistIdx) {
+  return lineXOffset(lineIdx) + twistIdx * state.params.twistSpacing;
+}
+
 // --------------------------------------------------------------- edges -----
 
 function deriveEdges(s) {
@@ -61,62 +72,62 @@ function deriveEdges(s) {
 
 // ------------------------------------------------------------ auto-pick ----
 
-// Tether goes up-left. Default to the line directly above; if that's empty,
-// walk further up. Pick the rightmost twist whose index < ours; if none
-// (we're far left), pick the leftmost twist on that line.
+// Tether goes up-left (strictly smaller X). Walk up from the line directly
+// above; pick the rightmost twist whose X < source X. If none satisfies it
+// on that line, fall through to the next line up.
 function autoPickTether(s, lineIdx, twistIdx) {
+  const xS = twistX(lineIdx, twistIdx);
   for (let li = lineIdx - 1; li >= 0; li--) {
     const above = s.lines[li];
     if (!above.twists.length) continue;
-    for (let i = Math.min(twistIdx - 1, above.twists.length - 1); i >= 0; i--) {
-      return above.twists[i].id;
-    }
-    return above.twists[0].id;
+    let bestIdx = -1, bestX = -Infinity;
+    above.twists.forEach((t, i) => {
+      const x = twistX(li, i);
+      if (x < xS && x > bestX) { bestX = x; bestIdx = i; }
+    });
+    if (bestIdx >= 0) return above.twists[bestIdx].id;
   }
   return null;
 }
 
-// Hoist for a fast lead: needs to land on a line above, with index strictly
-// between meet's index and post's index (so lead/meet→up-right and post→up-left
-// all hold). Search directly-above first, then further up.
+// Hoist for a fast lead: needs to land on a line above, with X strictly
+// between meet's X and post's X if a post exists, or just past meet otherwise
+// (so lead/meet up-right and post up-left all hold).
 function autoPickHoist(s, lineIdx, twistIdx) {
   const line = s.lines[lineIdx];
   const fasts = line.twists.map((t, i) => ({ t, i })).filter((o) => isFast(o.t));
   const pos = fasts.findIndex((o) => o.i === twistIdx);
-  if (pos < 0 || pos > fasts.length - 3) return null;
-  const meetIdx = fasts[pos + 1].i;
-  const postIdx = fasts[pos + 2].i;
-  const target = (meetIdx + postIdx) / 2;
+  if (pos < 0 || pos > fasts.length - 2) return null;   // need at least a meet
+  const selfX = twistX(lineIdx, twistIdx);
+  const meetX = twistX(lineIdx, fasts[pos + 1].i);
+  const hasPost = pos + 2 < fasts.length;
+  const postX = hasPost ? twistX(lineIdx, fasts[pos + 2].i) : null;
+  const target = hasPost ? (meetX + postX) / 2 : meetX + state.params.twistSpacing / 2;
   for (let li = lineIdx - 1; li >= 0; li--) {
     const above = s.lines[li];
+    if (!above.twists.length) continue;
     let best = null, bestDist = Infinity;
     above.twists.forEach((t, i) => {
-      if (i > meetIdx && i < postIdx) {
-        const d = Math.abs(i - target);
-        if (d < bestDist) { bestDist = d; best = t.id; }
-      }
+      const x = twistX(li, i);
+      const ok = x > selfX && x > meetX && (!hasPost || x < postX);
+      if (!ok) return;
+      const d = Math.abs(x - target);
+      if (d < bestDist) { bestDist = d; best = t.id; }
     });
     if (best) return best;
   }
-  // Fallback: closest by index on the line directly above, even if it
-  // doesn't satisfy the bracket. User can adjust.
-  const above = s.lines[lineIdx - 1];
-  if (!above || !above.twists.length) return null;
-  let best = null, bestDist = Infinity;
-  above.twists.forEach((t, i) => {
-    const d = Math.abs(i - target);
-    if (d < bestDist) { bestDist = d; best = t.id; }
-  });
-  return best;
+  return null;
 }
 
 // After any structural change, re-evaluate which fast twists on `lineIdx`
 // are leads, and auto-pick a hoist for those that need one and don't have it.
+// A lead now requires only one more fast after it (the meet); post is added
+// automatically when a third fast appears (via deriveEdges).
 function recomputeHoists(s, lineIdx) {
   const line = s.lines[lineIdx];
   const fasts = line.twists.map((t, i) => ({ t, i })).filter((o) => isFast(o.t));
   fasts.forEach((o, fi) => {
-    const shouldHaveHoist = fi <= fasts.length - 3;
+    const shouldHaveHoist = fi <= fasts.length - 2;
     if (!shouldHaveHoist) { o.t.hoist = null; return; }
     if (!o.t.hoist) o.t.hoist = autoPickHoist(s, lineIdx, o.i);
   });
@@ -157,6 +168,9 @@ function setTether(twistId, targetId) {
   const src = idx[twistId], tgt = idx[targetId];
   if (!src || !tgt) return;
   if (tgt.lineIdx >= src.lineIdx) { flash('Tether must point to a line above'); return; }
+  const xS = twistX(src.lineIdx, src.twistIdx);
+  const xT = twistX(tgt.lineIdx, tgt.twistIdx);
+  if (xT >= xS) { flash('Tether must go up-left (target must be left of source)'); return; }
   src.twist.tether = targetId;
   recomputeHoists(state, src.lineIdx);
 }
@@ -168,8 +182,20 @@ function setHoist(twistId, targetId) {
   if (tgt.lineIdx >= src.lineIdx) { flash('Hoist must point to a line above'); return; }
   if (!isFast(src.twist)) { flash('Only fast twists can have a hoist'); return; }
   const fasts = src.line.twists.filter(isFast);
-  if (fasts.indexOf(src.twist) > fasts.length - 3) {
-    flash('Need two more fast twists after this one to act as lead'); return;
+  const fi = fasts.indexOf(src.twist);
+  if (fi > fasts.length - 2) {
+    flash('Need one more fast twist after this one to act as lead'); return;
+  }
+  const xS = twistX(src.lineIdx, src.twistIdx);
+  const xT = twistX(tgt.lineIdx, tgt.twistIdx);
+  const meetTwistIdx = src.line.twists.indexOf(fasts[fi + 1]);
+  const xM = twistX(src.lineIdx, meetTwistIdx);
+  if (xT <= xS) { flash('Hoist must be right of the lead'); return; }
+  if (xT <= xM) { flash('Hoist must be right of the meet'); return; }
+  if (fasts[fi + 2]) {
+    const postTwistIdx = src.line.twists.indexOf(fasts[fi + 2]);
+    const xP = twistX(src.lineIdx, postTwistIdx);
+    if (xT >= xP) { flash('Hoist must be left of the post'); return; }
   }
   src.twist.hoist = targetId;
 }
@@ -225,7 +251,7 @@ const SVG_OFFSET_Y = 50;
 function svgCoord(lineIdx, twistIdx) {
   const p = state.params;
   return {
-    x: SVG_OFFSET_X + twistIdx * p.twistSpacing * SVG_SCALE,
+    x: SVG_OFFSET_X + twistX(lineIdx, twistIdx) * SVG_SCALE,
     y: SVG_OFFSET_Y + lineIdx * p.lineSpacing * SVG_SCALE,
   };
 }
@@ -237,7 +263,7 @@ function renderEditor() {
   let maxTwists = 0;
   state.lines.forEach((line) => { maxTwists = Math.max(maxTwists, line.twists.length); });
   const lastCol = Math.max(maxTwists, 1);
-  const w = SVG_OFFSET_X + (lastCol + 1) * p.twistSpacing * SVG_SCALE + 20;
+  const w = SVG_OFFSET_X + ((lastCol + 1) * p.twistSpacing + p.twistSpacing / 2) * SVG_SCALE + 20;
   const h = SVG_OFFSET_Y + Math.max(state.lines.length, 1) * p.lineSpacing * SVG_SCALE + 20;
   svgEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
   svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
@@ -412,7 +438,7 @@ function worldPos(twistId, idx) {
   if (!info) return null;
   const p = state.params;
   return new THREE.Vector3(
-    info.twistIdx * p.twistSpacing,
+    twistX(info.lineIdx, info.twistIdx),
     p.plateThickness,
     info.lineIdx * p.lineSpacing,
   );
@@ -423,15 +449,18 @@ function buildScene() {
   const p = state.params;
   const idx = indexTwists(state);
 
-  let maxX = 0, maxZ = 0;
+  let minX = 0, maxX = 0, maxZ = 0;
   state.lines.forEach((line, li) => {
-    if (line.twists.length) maxX = Math.max(maxX, (line.twists.length - 1) * p.twistSpacing);
+    if (line.twists.length) {
+      maxX = Math.max(maxX, twistX(li, line.twists.length - 1));
+      minX = Math.min(minX, twistX(li, 0));
+    }
     maxZ = Math.max(maxZ, li * p.lineSpacing);
   });
   const margin = Math.max(p.twistRadius * 2.2, 6);
-  const plateW = maxX + margin * 2;
+  const plateW = (maxX - minX) + margin * 2;
   const plateD = maxZ + margin * 2;
-  const plateCx = maxX / 2;
+  const plateCx = (maxX + minX) / 2;
   const plateCz = maxZ / 2;
 
   // plate
@@ -451,11 +480,13 @@ function buildScene() {
     const y = p.plateThickness + bh / 2;
     const mat = new THREE.MeshLambertMaterial({ color: PLATE_COLOR });
     const innerD = plateD - 2 * bw;
+    const left = minX - margin;
+    const right = maxX + margin;
     const strips = [
-      { dx: plateW, dz: bw,     x: plateCx,                 z: -margin + bw / 2 },
-      { dx: plateW, dz: bw,     x: plateCx,                 z: maxZ + margin - bw / 2 },
-      { dx: bw,     dz: innerD, x: -margin + bw / 2,        z: plateCz },
-      { dx: bw,     dz: innerD, x: maxX + margin - bw / 2,  z: plateCz },
+      { dx: plateW, dz: bw,     x: plateCx,            z: -margin + bw / 2 },
+      { dx: plateW, dz: bw,     x: plateCx,            z: maxZ + margin - bw / 2 },
+      { dx: bw,     dz: innerD, x: left + bw / 2,      z: plateCz },
+      { dx: bw,     dz: innerD, x: right - bw / 2,     z: plateCz },
     ];
     strips.forEach((s) => {
       if (s.dx <= 0 || s.dz <= 0) return;
@@ -497,22 +528,20 @@ function buildScene() {
     sceneRoot.add(m);
   });
 
-  fitCamera(plateW, plateD, p);
 }
 
-let cameraFitted = false;
-function fitCamera(w, d, p) {
-  // Only auto-fit on first build; user can orbit after.
-  if (cameraFitted) {
-    orbit.target.set(w / 2, p.plateThickness, d / 2);
-    return;
-  }
+function initCamera() {
+  // Set a sensible default view sized for a moderate rig (~10 twists by
+  // ~4 lines). After this, the user owns the camera — graph changes never
+  // touch it.
+  const p = state.params;
+  const target = new THREE.Vector3(10 * p.twistSpacing / 2, p.plateThickness, 4 * p.lineSpacing / 2);
   const fov = camera.fov * Math.PI / 180;
-  const dist = Math.max(w, d, 30) * 1.1 / (2 * Math.tan(fov / 2));
-  camera.position.set(w / 2, dist * 0.9, d / 2 + dist * 0.9);
-  orbit.target.set(w / 2, p.plateThickness, d / 2);
+  const span = Math.max(10 * p.twistSpacing, 4 * p.lineSpacing);
+  const dist = span * 1.2 / (2 * Math.tan(fov / 2));
+  camera.position.set(target.x, target.y + dist * 0.7, target.z + dist * 0.9);
+  orbit.target.copy(target);
   orbit.update();
-  cameraFitted = true;
 }
 
 function resize3D() {
@@ -765,7 +794,6 @@ function importJson(file) {
       if (obj.params) Object.assign(state.params, obj.params);
       if (obj.ids) Object.assign(ids, obj.ids);
       state.selection = null;
-      cameraFitted = false;
       syncParamInputs();
       rerender();
       flash('Loaded ' + file.name);
@@ -828,7 +856,6 @@ function rerender() {
 
 document.getElementById('btn-add-line').addEventListener('click', () => {
   addLine();
-  cameraFitted = false;
   rerender();
 });
 
@@ -840,7 +867,6 @@ document.getElementById('btn-add-twist').addEventListener('click', () => {
     li = state.lines.findIndex((l) => l.id === state.selection.id);
   }
   addTwistAtLine(li);
-  cameraFitted = false;
   rerender();
 });
 
@@ -857,7 +883,6 @@ document.getElementById('btn-remove').addEventListener('click', () => {
   else if (state.selection?.kind === 'line') removeLine(state.selection.id);
   else { flash('Nothing selected'); return; }
   state.selection = null;
-  cameraFitted = false;
   rerender();
 });
 
@@ -892,6 +917,7 @@ window.addEventListener('keydown', (ev) => {
 // ---------------------------------------------------------------- init ----
 
 bindParams();
+initCamera();
 rerender();
 resize3D();
 tick();
