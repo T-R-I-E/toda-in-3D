@@ -94,7 +94,7 @@
   .app {
     height: 100vh; width: 100vw;
     display: grid;
-    grid-template-rows: 70px 1fr 36px 92px 32px;
+    grid-template-rows: 70px 1fr 38px 54px;
     grid-template-columns: minmax(0, 1fr);
     overflow: hidden;
   }
@@ -169,14 +169,14 @@
        2px 0 0 color-mix(in oklab, var(--ana-cyan) 92%, transparent);
   }
   .brand-toda-word { font-size: 28px; }
-  .brand-3d { font-size: 24px; }
+  .brand-3d { font-size: 28px; }
   .brand-in {
     font-family: 'DM Serif Display', Georgia, serif;
     font-style: italic; font-weight: 400; font-size: 15px;
     color: var(--ink-mute); text-shadow: none;
   }
   .brand-bang {
-    color: var(--accent); margin-left: 1px; font-size: 26px;
+    color: var(--accent); margin-left: 1px; font-size: 30px;
     text-shadow:
       -1.5px 0 0 color-mix(in oklab, var(--accent) 50%, var(--ana-red)),
        1.5px 0 0 color-mix(in oklab, var(--accent) 50%, var(--ana-cyan));
@@ -282,12 +282,25 @@
     text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--ink-dim);
   }
-  .panel-meta { font-size: 11px; color: var(--ink-mute); white-space: nowrap; }
+  .panel-meta {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 11px; color: var(--ink-mute); white-space: nowrap;
+  }
 
   .panel-body {
     flex: 1; min-height: 0;
     position: relative;
     overflow: hidden;
+    background: var(--bg);
+  }
+
+  /* the lens IS the panel viewport: a rounded, clipped container the SVG
+     and 3D canvas live inside. Content can't escape the rounded shape. */
+  .lens-viewport {
+    position: absolute; inset: 8px;
+    border-radius: 14px;
+    overflow: hidden;
+    z-index: 1;
     background:
       radial-gradient(ellipse at center, transparent 40%, var(--lens-soft) 100%),
       var(--bg);
@@ -387,7 +400,8 @@
 
   /* ---------- help strip ---------- */
   .help {
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
     padding: 0 16px;
     font-size: 12px; color: var(--ink-mute);
     border-top: 1px solid var(--line);
@@ -395,6 +409,8 @@
     background: color-mix(in oklab, var(--bg-elev1) 60%, transparent);
     overflow-x: auto; white-space: nowrap;
   }
+  .help-shortcuts { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .help .legend { display: inline-flex; align-items: center; gap: 14px; flex-shrink: 0; }
   .help em { font-style: normal; color: var(--ink); font-weight: 500; }
   .help-verb { color: var(--ink); font-weight: 500; }
   .help-sep { color: var(--ink-dim); }
@@ -414,8 +430,9 @@
     min-width: 0; overflow: hidden;
   }
   .controls {
-    display: flex; align-items: stretch;
-    padding: 12px 14px;
+    display: flex; align-items: center;
+    gap: 14px;
+    padding: 0 14px;
     overflow-x: auto;
     scrollbar-color: var(--accent) var(--bg-input);
     scrollbar-width: thin;
@@ -453,27 +470,14 @@
     50%      { transform: translateX(3px); }
   }
 
-  .control-group {
-    display: flex; align-items: center; gap: 18px;
-    padding: 0 18px; border-right: 1px dashed var(--line);
-  }
-  .control-group:first-child { padding-left: 4px; }
-  .control-group:last-child  { border-right: none; }
-  .group-label {
-    font-family: var(--font-mono); font-size: 10px;
-    text-transform: uppercase; letter-spacing: 0.12em;
-    color: var(--ink-dim);
-    white-space: nowrap; flex-shrink: 0;
-  }
-  .group-unit { opacity: 0.7; }
-
   .slider {
-    display: inline-flex; align-items: center; gap: 10px;
-    font-size: 12px; flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; flex-shrink: 0;
   }
   .slider-label {
-    color: var(--accent); font-size: 11.5px;
-    min-width: 52px; text-align: right; opacity: 0.95;
+    color: var(--accent); font-size: 13px;
+    min-width: 56px; text-align: right; opacity: 0.95;
+    font-weight: 500;
   }
   .slider.tone-teth { --accent: var(--rig-teth); }
   .slider.tone-lead { --accent: var(--rig-lead); }
@@ -517,21 +521,12 @@
     cursor: grab;
   }
   .slider-value {
-    font-family: var(--font-mono); font-size: 11.5px;
-    color: var(--ink); min-width: 36px; text-align: left;
+    font-family: var(--font-mono); font-size: 13px;
+    color: var(--ink); min-width: 32px; text-align: left;
     font-variant-numeric: tabular-nums;
   }
 
-  /* ---------- status bar ---------- */
-  .statusbar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 14px;
-    font-size: 11px;
-    border-top: 1px solid var(--line);
-    background: var(--bg);
-    color: var(--ink-mute);
-  }
-  .status-left { display: flex; align-items: center; gap: 10px; min-height: 0; overflow: hidden; }
+  /* ---------- status chips (inside the rig editor panel header) ---------- */
   .status-chip {
     background: var(--bg-elev2);
     border: 1px solid var(--line);
@@ -630,10 +625,6 @@
 
     <div class="spacer"></div>
 
-    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme" title="Toggle dark/light">
-      <span class="theme-toggle-track" id="theme-toggle-icon"></span>
-    </button>
-
     <div class="io-group" role="group" aria-label="Import / export">
       <button class="btn btn-tone btn-tone-teth" id="btn-import">
         <span class="btn-icon"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9V2M4 5l3-3 3 3M2.5 11.5h9"/></svg></span>
@@ -653,17 +644,23 @@
         <span>Export .3mf</span>
       </button>
     </div>
+
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme" title="Toggle dark/light">
+      <span class="theme-toggle-track" id="theme-toggle-icon"></span>
+    </button>
   </header>
 
   <main class="stage">
     <section class="panel panel-lens-red" aria-label="Rig editor">
       <div class="panel-header">
         <span class="panel-eyebrow">Rig editor <span class="lens-tag lens-tag-red">L · left lens</span></span>
-        <span class="panel-meta mono" id="panel-meta-editor">—</span>
+        <span class="panel-meta mono" id="panel-meta-editor"></span>
       </div>
       <div class="panel-body">
-        <div class="ph-halftone"></div>
-        <svg id="editorSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="lens-viewport">
+          <div class="ph-halftone"></div>
+          <svg id="editorSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
         <div class="lens-frame" aria-hidden="true"></div>
       </div>
     </section>
@@ -674,87 +671,79 @@
         <span class="panel-meta mono">drag to orbit</span>
       </div>
       <div class="panel-body">
-        <div class="ph-halftone"></div>
-        <canvas id="previewCanvas"></canvas>
+        <div class="lens-viewport">
+          <div class="ph-halftone"></div>
+          <canvas id="previewCanvas"></canvas>
+        </div>
         <div class="lens-frame" aria-hidden="true"></div>
       </div>
     </section>
   </main>
 
   <div class="help">
-    <span><span class="help-verb">click</span> a twist to select</span>
-    <span class="help-sep">·</span>
-    <span><kbd class="kbd">shift</kbd>-click a twist above to set <em>tether</em></span>
-    <span class="help-sep">·</span>
-    <span><kbd class="kbd">alt</kbd>-click to set <em>hoist</em></span>
-    <span class="help-sep">·</span>
-    <span><kbd class="kbd">F</kbd> toggle fast</span>
-    <span class="help-sep">·</span>
-    <span><kbd class="kbd">Del</kbd> remove</span>
+    <span class="help-shortcuts">
+      <span><span class="help-verb">click</span> a twist to select</span>
+      <span class="help-sep">·</span>
+      <span><kbd class="kbd">shift</kbd>-click a twist above to set <em>tether</em></span>
+      <span class="help-sep">·</span>
+      <span><kbd class="kbd">alt</kbd>-click to set <em>hoist</em></span>
+      <span class="help-sep">·</span>
+      <span><kbd class="kbd">F</kbd> toggle fast</span>
+      <span class="help-sep">·</span>
+      <span><kbd class="kbd">Del</kbd> remove</span>
+    </span>
+    <span class="legend">
+      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-prev)"></span>prev</span>
+      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-teth)"></span>teth</span>
+      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-lead)"></span>lead</span>
+      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-meet)"></span>meet</span>
+      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-post)"></span>post</span>
+    </span>
   </div>
 
   <div class="controls-wrap">
     <div class="controls" id="params">
-      <div class="control-group">
-        <span class="group-label">Geometry <span class="group-unit">mm</span></span>
-        <label class="slider tone-post">
-          <span class="slider-label">plate</span>
-          <span class="slider-track-wrap"><input type="range" data-p="plateThickness" min="0.5" max="6" step="0.1"></span>
-          <span class="slider-value" data-v="plateThickness"></span>
-        </label>
-        <label class="slider tone-teth">
-          <span class="slider-label">border h</span>
-          <span class="slider-track-wrap"><input type="range" data-p="borderHeight" min="0" max="10" step="0.5"></span>
-          <span class="slider-value" data-v="borderHeight"></span>
-        </label>
-        <label class="slider tone-meet">
-          <span class="slider-label">border w</span>
-          <span class="slider-track-wrap"><input type="range" data-p="borderWidth" min="0" max="8" step="0.5"></span>
-          <span class="slider-value" data-v="borderWidth"></span>
-        </label>
-        <label class="slider tone-lead">
-          <span class="slider-label">twist r</span>
-          <span class="slider-track-wrap"><input type="range" data-p="twistRadius" min="1" max="10" step="0.2"></span>
-          <span class="slider-value" data-v="twistRadius"></span>
-        </label>
-        <label class="slider tone-prev">
-          <span class="slider-label">edge r</span>
-          <span class="slider-track-wrap"><input type="range" data-p="edgeRadius" min="0.2" max="3" step="0.1"></span>
-          <span class="slider-value" data-v="edgeRadius"></span>
-        </label>
-      </div>
-
-      <div class="control-group">
-        <span class="group-label">Layout</span>
-        <label class="slider tone-lead">
-          <span class="slider-label">twist gap</span>
-          <span class="slider-track-wrap"><input type="range" data-p="twistSpacing" min="8" max="32" step="1"></span>
-          <span class="slider-value" data-v="twistSpacing"></span>
-        </label>
-        <label class="slider tone-meet">
-          <span class="slider-label">line gap</span>
-          <span class="slider-track-wrap"><input type="range" data-p="lineSpacing" min="14" max="48" step="1"></span>
-          <span class="slider-value" data-v="lineSpacing"></span>
-        </label>
-      </div>
+      <label class="slider tone-post">
+        <span class="slider-label">plate</span>
+        <span class="slider-track-wrap"><input type="range" data-p="plateThickness" min="0.5" max="6" step="0.1"></span>
+        <span class="slider-value" data-v="plateThickness"></span>
+      </label>
+      <label class="slider tone-teth">
+        <span class="slider-label">border h</span>
+        <span class="slider-track-wrap"><input type="range" data-p="borderHeight" min="0" max="10" step="0.5"></span>
+        <span class="slider-value" data-v="borderHeight"></span>
+      </label>
+      <label class="slider tone-meet">
+        <span class="slider-label">border w</span>
+        <span class="slider-track-wrap"><input type="range" data-p="borderWidth" min="0" max="8" step="0.5"></span>
+        <span class="slider-value" data-v="borderWidth"></span>
+      </label>
+      <label class="slider tone-lead">
+        <span class="slider-label">twist r</span>
+        <span class="slider-track-wrap"><input type="range" data-p="twistRadius" min="1" max="10" step="0.2"></span>
+        <span class="slider-value" data-v="twistRadius"></span>
+      </label>
+      <label class="slider tone-prev">
+        <span class="slider-label">edge r</span>
+        <span class="slider-track-wrap"><input type="range" data-p="edgeRadius" min="0.2" max="3" step="0.1"></span>
+        <span class="slider-value" data-v="edgeRadius"></span>
+      </label>
+      <label class="slider tone-lead">
+        <span class="slider-label">twist gap</span>
+        <span class="slider-track-wrap"><input type="range" data-p="twistSpacing" min="8" max="32" step="1"></span>
+        <span class="slider-value" data-v="twistSpacing"></span>
+      </label>
+      <label class="slider tone-meet">
+        <span class="slider-label">line gap</span>
+        <span class="slider-track-wrap"><input type="range" data-p="lineSpacing" min="14" max="48" step="1"></span>
+        <span class="slider-value" data-v="lineSpacing"></span>
+      </label>
     </div>
     <div class="controls-fade" id="controls-fade" title="scroll for more">
       <span class="controls-chev">›</span>
     </div>
   </div>
 
-  <footer class="statusbar">
-    <div class="status-left mono" id="status-left">
-      <span class="status-chip">—</span>
-    </div>
-    <div class="legend">
-      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-prev)"></span>prev</span>
-      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-teth)"></span>teth</span>
-      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-lead)"></span>lead</span>
-      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-meet)"></span>meet</span>
-      <span class="swatch"><span class="swatch-dot" style="background: var(--rig-post)"></span>post</span>
-    </div>
-  </footer>
 </div>
 
 <script type="module" src="app.js"></script>

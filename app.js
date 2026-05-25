@@ -1233,7 +1233,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function flash(msg) {
-  const el = document.getElementById('status-left');
+  const el = document.getElementById('panel-meta-editor');
   if (!el) return;
   el.dataset.flashing = '1';
   el.innerHTML = `<span class="status-chip">${esc(msg)}</span>`;
@@ -1242,20 +1242,15 @@ function flash(msg) {
 }
 
 function updateStatus() {
-  const left = document.getElementById('status-left');
   const meta = document.getElementById('panel-meta-editor');
-  if (meta) {
-    meta.textContent = state.lines.length
-      ? state.lines.map((l, i) => `L${i}:${l.twists.length}`).join(' · ')
-      : '—';
-  }
-  if (left && !left.dataset.flashing) {
+  if (meta && !meta.dataset.flashing) {
     const n = state.lines.length;
-    const chip = `<span class="status-chip">${n} line${n === 1 ? '' : 's'}</span>`;
+    const twists = state.lines.reduce((s, l) => s + l.twists.length, 0);
+    const chip = `<span class="status-chip">${n} line${n === 1 ? '' : 's'} · ${twists} twist${twists === 1 ? '' : 's'}</span>`;
     const sel = state.selection
-      ? `<span class="status-dot">·</span><span class="status-piece">sel=<span class="status-sel">${esc(state.selection.kind)}:${esc(state.selection.id)}</span></span>`
+      ? `<span class="status-piece">sel=<span class="status-sel">${esc(state.selection.kind)}:${esc(state.selection.id)}</span></span>`
       : '';
-    left.innerHTML = chip + sel;
+    meta.innerHTML = chip + sel;
   }
   updateFastPill();
 }
