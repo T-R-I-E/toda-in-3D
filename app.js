@@ -780,20 +780,25 @@ function exportJson() {
   download(new Blob([data], { type: 'application/json' }), 'rig.json');
 }
 
+function applySnapshot(obj) {
+  if (!obj || !Array.isArray(obj.lines) || obj.lines.length === 0) {
+    throw new Error('missing or empty lines[]');
+  }
+  state.lines = obj.lines.map((l) => ({
+    id: l.id, twists: (l.twists || []).map((t) => ({
+      id: t.id, tether: t.tether || null, hoist: t.hoist || null,
+    })),
+  }));
+  if (obj.params) Object.assign(state.params, obj.params);
+  if (obj.ids) Object.assign(ids, obj.ids);
+  state.selection = null;
+}
+
 function importJson(file) {
   const r = new FileReader();
   r.onload = (ev) => {
     try {
-      const obj = JSON.parse(ev.target.result);
-      if (!obj || !Array.isArray(obj.lines)) throw new Error('missing lines[]');
-      state.lines = obj.lines.map((l) => ({
-        id: l.id, twists: (l.twists || []).map((t) => ({
-          id: t.id, tether: t.tether || null, hoist: t.hoist || null,
-        })),
-      }));
-      if (obj.params) Object.assign(state.params, obj.params);
-      if (obj.ids) Object.assign(ids, obj.ids);
-      state.selection = null;
+      applySnapshot(JSON.parse(ev.target.result));
       syncParamInputs();
       rerender();
       flash('Loaded ' + file.name);
@@ -802,6 +807,29 @@ function importJson(file) {
     }
   };
   r.readAsText(file);
+}
+
+// ----------------------------------------------------------- localStorage ----
+
+const STORAGE_KEY = 'toda-rig-designer:v1';
+
+function saveSession() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      version: 1, ids, lines: state.lines, params: state.params,
+    }));
+  } catch (_) { /* quota/disabled — fall through silently */ }
+}
+
+function restoreSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    applySnapshot(JSON.parse(raw));
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------- params UI ----
@@ -852,6 +880,7 @@ function rerender() {
   renderEditor();
   buildScene();
   updateStatus();
+  saveSession();
 }
 
 document.getElementById('btn-add-line').addEventListener('click', () => {
@@ -916,6 +945,7 @@ window.addEventListener('keydown', (ev) => {
 
 // ---------------------------------------------------------------- init ----
 
+restoreSession();
 bindParams();
 initCamera();
 rerender();

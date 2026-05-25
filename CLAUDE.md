@@ -40,6 +40,13 @@ at that same hoist.
   bracket, the auto-pick returns null and no hoist edge is drawn until
   the user adds a candidate or alt-clicks one manually.
 
+## Persistence
+The current rig (lines + params + id counters) is saved to
+`localStorage['toda-rig-designer:v1']` on every rerender and restored on
+page load. Selection and camera are not persisted. `applySnapshot` is the
+shared loader for both this and `Import JSON`. To start fresh, clear the
+key in DevTools (no UI button yet).
+
 ## Camera
 `initCamera()` runs once on page load and sizes the view for a typical
 ~10-twist × ~4-line rig. After that, the camera is owned by the user
