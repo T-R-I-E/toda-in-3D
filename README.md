@@ -2,7 +2,6 @@
 
 > See your rigging in eye-popping 3-D! 
 > Dare the visually overstimulating anaglyphs to print a handheld toda file!
-> Print out your precious rigs as keepsakes, for safekeeping!
 
 A single-page web app for designing a TODA rig topologically and
 exporting it as a 3D-printable `.3mf`. No backend, no build step, no
@@ -100,4 +99,4 @@ translates so all coordinates stay positive. It's important to always stay posit
 
 ---
 
-*The lights dim. Roll print.*
+*Directed and produced by T.R.I.E.*
