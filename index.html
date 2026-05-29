@@ -284,6 +284,17 @@
     box-shadow: 0 0 6px color-mix(in oklab, var(--rig-lead) 70%, transparent);
   }
 
+  .topbar-link {
+    font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+    text-decoration: none;
+    padding: 0 10px;
+    flex-shrink: 0;
+    transition: color 120ms ease;
+  }
+  .topbar-link:hover { color: var(--ink); }
+
   .theme-toggle {
     appearance: none; background: var(--bg-elev2); border: 1px solid var(--line);
     border-radius: 999px; padding: 4px; cursor: pointer;
@@ -672,6 +683,8 @@
         <span>Export .3mf</span>
       </button>
     </div>
+
+    <a class="topbar-link" href="https://github.com/T-R-I-E/toda-in-3D" target="_blank" rel="noopener" title="Source code on GitHub">code</a>
 
     <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme" title="Toggle dark/light">
       <span class="theme-toggle-track" id="theme-toggle-icon"></span>
