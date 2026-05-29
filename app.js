@@ -16,7 +16,9 @@ function defaultXShift(lineIdx) {
 }
 
 const state = {
-  lines: [{ id: nid('L'), twists: [], xShift: 0 }],
+  // Cork always boots with a twist so the rule "exactly one twist is
+  // always selected" holds from the very first render.
+  lines: [{ id: nid('L'), twists: [{ id: nid('t') }], xShift: 0 }],
   selection: null,
   params: {
     plateThickness: 2,
@@ -26,6 +28,18 @@ const state = {
     edgeRadius:     0.6,
     twistSpacing:   16,
     lineSpacing:    28,
+    // 'solid' = hemispheres + cylinders sitting on the plate.
+    // 'embed' = full spheres + full cylinders centred inside the plate
+    //           (designed for a transparent plate; viewport renders the
+    //           plate semi-transparent so the inclusions are visible).
+    // 'flat'  = thin discs + thin bars sunk into the plate from the top,
+    //           extending down by `flatDepth` mm (clamped to plateThickness).
+    //           Biz-card style.
+    printMode:      'solid',
+    // Absolute depth (mm) the flat-mode discs/bars sink into the plate
+    // from its top face. Clamped at use time to plateThickness so the
+    // inclusions never poke out the bottom.
+    flatDepth:      1,
   },
 };
 
@@ -287,7 +301,35 @@ function trySetTetherWithShift(twistId, targetId) {
 
 function addLine() {
   const li = state.lines.length;
-  state.lines.push({ id: nid('L'), twists: [], xShift: defaultXShift(li) });
+  const line = { id: nid('L'), twists: [], xShift: defaultXShift(li) };
+  state.lines.push(line);
+  // Every line carries at least one twist. The line is auto-removed when
+  // its last twist is deleted, so creating one without a twist would be
+  // an immediately-inconsistent state.
+  const twistId = nid('t');
+  line.twists.push({ id: twistId });
+  return twistId;   // caller can select the new twist directly
+}
+
+// Selection invariant: a valid twist is always selected. Called from
+// rerender() so every state change ends in a normalised selection.
+function ensureSelection() {
+  // Guarantee at least one twist exists somewhere. (Restored JSON may
+  // be older than this rule.)
+  let any = null;
+  for (const line of state.lines) {
+    if (line.twists.length) { any = line.twists[0].id; break; }
+  }
+  if (!any) {
+    const id = nid('t');
+    state.lines[0].twists.push({ id });
+    any = id;
+  }
+  // Keep the current selection if it still refers to a live twist;
+  // otherwise fall back to the first available one.
+  if (state.selection?.kind === 'twist'
+      && indexTwists(state)[state.selection.id]) return;
+  state.selection = { kind: 'twist', id: any };
 }
 
 function addTwistAtLine(lineIdx, atIdx = null) {
@@ -370,6 +412,13 @@ function removeTwist(twistId) {
     });
   });
   info.line.twists.splice(info.twistIdx, 1);
+  // A line with no twists is meaningless — auto-remove it (unless it's
+  // the only line, in which case we leave the empty rig as a starting
+  // point for the next addTwist).
+  if (info.line.twists.length === 0 && state.lines.length > 1) {
+    const li = state.lines.indexOf(info.line);
+    state.lines.splice(li, 1);
+  }
   state.lines.forEach((_, li) => recomputeHoists(state, li));
 }
 
@@ -424,7 +473,8 @@ function renderEditor() {
   state.lines.forEach((line) => { maxTwists = Math.max(maxTwists, line.twists.length); });
   const lastCol = Math.max(maxTwists, 1);
   const w = SVG_OFFSET_X + ((lastCol + 1) * p.twistSpacing + p.twistSpacing / 2) * SVG_SCALE + 20;
-  const h = SVG_OFFSET_Y + Math.max(state.lines.length, 1) * p.lineSpacing * SVG_SCALE + 20;
+  // +1 line of room below the last real line for the ghost "+ line" affordance.
+  const h = SVG_OFFSET_Y + (state.lines.length + 1) * p.lineSpacing * SVG_SCALE + 20;
   svgEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
   svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 
@@ -435,16 +485,13 @@ function renderEditor() {
 
   state.lines.forEach((line, li) => {
     const y = SVG_OFFSET_Y + li * p.lineSpacing * SVG_SCALE;
-    const selLine = state.selection?.kind === 'line' && state.selection.id === line.id;
+    // Lines are no longer selectable — they're just labels. Selection
+    // is always a twist (or null). Removing the last twist on a line
+    // auto-removes the line itself.
     const label = svg('text', {
-      x: 10, y: y + 4,
-      class: 'line-label' + (selLine ? ' selected' : ''),
+      x: 10, y: y + 4, class: 'line-label',
     }, labelsG);
     label.textContent = `${line.id}${li === 0 ? ' (cork)' : ''}`;
-    label.addEventListener('click', () => {
-      state.selection = { kind: 'line', id: line.id };
-      rerender();
-    });
 
     if (line.twists.length > 1) {
       const a = svgCoord(li, 0);
@@ -494,7 +541,8 @@ function renderEditor() {
     }, twistsG);
     ghost.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      addTwistAtLine(li);
+      const id = addTwistAtLine(li);
+      if (id) state.selection = { kind: 'twist', id };
       rerender();
     });
     svg('text', {
@@ -502,13 +550,28 @@ function renderEditor() {
     }, twistsG).textContent = '+';
   });
 
-  svgEl.addEventListener('click', clearSelectionIfBackground, { once: true });
-}
-
-function clearSelectionIfBackground(ev) {
-  if (ev.target === svgEl) {
-    state.selection = null;
-    rerender();
+  // ghost "+ line" affordance below the last line — mirrors the per-line
+  // ghost "+ twist" so adding lines feels in-context, not just toolbar-only.
+  {
+    const newLi = state.lines.length;
+    const ghostY = SVG_OFFSET_Y + newLi * p.lineSpacing * SVG_SCALE;
+    const ghostX = SVG_OFFSET_X + defaultXShift(newLi) * SVG_SCALE;
+    const gr = r * 0.75;
+    const ghost = svg('circle', {
+      cx: ghostX, cy: ghostY, r: gr, class: 'ghost-add',
+    }, twistsG);
+    ghost.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const id = addLine();
+      state.selection = { kind: 'twist', id };
+      rerender();
+    });
+    svg('text', {
+      x: ghostX, y: ghostY, class: 'ghost-plus',
+    }, twistsG).textContent = '+';
+    svg('text', {
+      x: 10, y: ghostY + 4, class: 'line-label',
+    }, labelsG).textContent = '+ line';
   }
 }
 
@@ -593,6 +656,21 @@ function cylinderBetween(a, b, radius) {
   return m;
 }
 
+// Flat-mode edge: a rectangular bar lying on the plate, length runs from
+// a to b, width is the bar's horizontal cross-section, height is its
+// vertical extent (the depth it sinks into the plate). Box's local Z axis
+// runs along the bar so the rotation matches dir → +Z.
+function flatBarBetween(a, b, width, height) {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = dir.length();
+  if (len < 1e-5) return null;
+  const geom = new THREE.BoxGeometry(width, height, len);
+  const m = new THREE.Mesh(geom);
+  m.position.copy(a).addScaledVector(dir, 0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+  return m;
+}
+
 // World-space position of a twist in Three.js (Y is up; Z is "down" across lines).
 function worldPos(twistId, idx) {
   const info = idx[twistId];
@@ -609,6 +687,10 @@ function buildScene() {
   disposeGroup(sceneRoot);
   const p = state.params;
   const idx = indexTwists(state);
+  const mode = p.printMode || 'solid';
+  // 'embed' and 'flat' are designed for a transparent plate; show the
+  // plate translucent in the viewport so the inclusions are visible.
+  const translucent = mode !== 'solid';
 
   let minX = 0, maxX = 0, maxZ = 0;
   state.lines.forEach((line, li) => {
@@ -625,13 +707,22 @@ function buildScene() {
   const plateCz = maxZ / 2;
 
   // plate
+  // depthWrite is disabled when translucent so the embedded inclusions
+  // (which are inside the plate volume) aren't depth-rejected behind it.
+  const plateMat = new THREE.MeshLambertMaterial({
+    color: PLATE_COLOR,
+    transparent: translucent,
+    opacity: translucent ? 0.32 : 1,
+    depthWrite: !translucent,
+  });
   {
     const m = new THREE.Mesh(
       new THREE.BoxGeometry(plateW, p.plateThickness, plateD),
-      new THREE.MeshLambertMaterial({ color: PLATE_COLOR }),
+      plateMat,
     );
     m.position.set(plateCx, p.plateThickness / 2, plateCz);
     m.userData.exportColor = 'plate';
+    m.renderOrder = translucent ? 1 : 0;
     sceneRoot.add(m);
   }
 
@@ -639,7 +730,6 @@ function buildScene() {
   if (p.borderHeight > 0 && p.borderWidth > 0) {
     const bh = p.borderHeight, bw = p.borderWidth;
     const y = p.plateThickness + bh / 2;
-    const mat = new THREE.MeshLambertMaterial({ color: PLATE_COLOR });
     const innerD = plateD - 2 * bw;
     const left = minX - margin;
     const right = maxX + margin;
@@ -651,19 +741,37 @@ function buildScene() {
     ];
     strips.forEach((s) => {
       if (s.dx <= 0 || s.dz <= 0) return;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(s.dx, bh, s.dz), mat);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(s.dx, bh, s.dz), plateMat);
       m.position.set(s.x, y, s.z);
       m.userData.exportColor = 'plate';
+      m.renderOrder = translucent ? 1 : 0;
       sceneRoot.add(m);
     });
   }
 
-  // twists (hemispheres)
-  const twistGeom = hemisphereGeom(p.twistRadius);
+  // ---- twists ----
+  // Solid: hemisphere sitting on the plate, dome up.
+  // Embed: full sphere centred inside the plate.
+  // Flat : disc-shaped cylinder sunk into the plate from the top by
+  //        flatDepth mm (clamped to plateThickness — discs never poke
+  //        out the bottom).
+  const flatDepthMm = Math.max(0.05, Math.min(p.plateThickness, p.flatDepth));
+  let twistGeom, twistY;
+  if (mode === 'solid') {
+    twistGeom = hemisphereGeom(p.twistRadius);
+    twistY = p.plateThickness;
+  } else if (mode === 'embed') {
+    twistGeom = new THREE.SphereGeometry(p.twistRadius, 24, 16);
+    twistY = p.plateThickness / 2;
+  } else {
+    twistGeom = new THREE.CylinderGeometry(p.twistRadius, p.twistRadius, flatDepthMm, 24, 1, false);
+    twistY = p.plateThickness - flatDepthMm / 2;
+  }
   const twistMat = new THREE.MeshLambertMaterial({ color: TWIST_COLOR });
   state.lines.forEach((line) => {
     line.twists.forEach((t) => {
       const pos = worldPos(t.id, idx);
+      pos.y = twistY;
       const m = new THREE.Mesh(twistGeom, twistMat);
       m.position.copy(pos);
       m.userData.exportColor = 'twist';
@@ -671,21 +779,38 @@ function buildScene() {
     });
   });
 
-  // edges (capped cylinders)
+  // ---- edges ----
   const edgeMats = {};
   Object.entries(EDGE_COLOR).forEach(([k, c]) => {
     edgeMats[k] = new THREE.MeshLambertMaterial({ color: c });
   });
-  // Lift cylinder centers by edgeRadius so the cylinder bottom rests on
-  // the plate top instead of dipping below it. This keeps the plate free
-  // of internal geometry (so it can be printed as a clean solid).
-  const edgeLift = p.edgeRadius;
+  // Solid: cylinder lifted so its bottom rests on the plate top (keeps
+  //        the plate a clean solid).
+  // Embed: cylinder centred inside the plate.
+  // Flat : rectangular bar at the same depth as the flat twist discs.
+  const edgeY =
+    mode === 'solid' ? p.plateThickness + p.edgeRadius :
+    mode === 'embed' ? p.plateThickness / 2 :
+                       p.plateThickness - flatDepthMm / 2;
   deriveEdges(state).forEach((e) => {
     const a = worldPos(e.from, idx); const b = worldPos(e.to, idx);
     if (!a || !b) return;
-    a.y = p.plateThickness + edgeLift;
-    b.y = p.plateThickness + edgeLift;
-    const m = cylinderBetween(a, b, p.edgeRadius);
+    a.y = edgeY;
+    b.y = edgeY;
+    let m;
+    if (mode === 'flat') {
+      // Stop the bar at the disc circumference at both ends so the disc
+      // visually owns its area instead of having a bar bleed through it.
+      const dir = new THREE.Vector3().subVectors(b, a);
+      const len = dir.length();
+      if (len <= 2 * p.twistRadius + 1e-3) return;   // discs touch/overlap
+      const u = dir.normalize();
+      a.addScaledVector(u, p.twistRadius);
+      b.addScaledVector(u, -p.twistRadius);
+      m = flatBarBetween(a, b, p.edgeRadius * 2, flatDepthMm);
+    } else {
+      m = cylinderBetween(a, b, p.edgeRadius);
+    }
     if (!m) return;
     m.material = edgeMats[e.type];
     m.userData.exportColor = e.type;
@@ -1005,6 +1130,10 @@ function exportScad() {
   const p = state.params;
   const idx = indexTwists(state);
   const f = (n) => (Math.round(n * 1000) / 1000).toString();
+  const mode = p.printMode || 'solid';
+  // Mirror the buildScene formulas so the printed model matches the
+  // viewport. flatDepth is absolute mm, clamped to plateThickness.
+  const flatDepthMm = Math.max(0.05, Math.min(p.plateThickness, p.flatDepth));
 
   // Plate bounds. Note: in the editor "down the screen" is increasing line
   // index, but on a print bed "back of the bed" is increasing Y. To make
@@ -1039,6 +1168,9 @@ function exportScad() {
     lines.push(`borderH     = ${f(p.borderHeight)};`);
     lines.push(`borderW     = ${f(p.borderWidth)};`);
   }
+  if (mode === 'flat') {
+    lines.push(`flatDepth  = ${f(flatDepthMm)};   // mm, clamped to plateThick at use`);
+  }
   lines.push(``);
   lines.push(`// Hemisphere sitting flat on Z=z, dome up.`);
   lines.push(`module hemi(x, y, z, r) {`);
@@ -1048,12 +1180,34 @@ function exportScad() {
   lines.push(`  }`);
   lines.push(`}`);
   lines.push(``);
+  lines.push(`// Sphere centred at (x, y, z).`);
+  lines.push(`module ball(x, y, z, r) {`);
+  lines.push(`  translate([x, y, z]) sphere(r=r);`);
+  lines.push(`}`);
+  lines.push(``);
+  lines.push(`// Disc (short cylinder, axis = +Z) sunk into the plate from the`);
+  lines.push(`// top. Top face at Z=plateThick, height=h going down.`);
+  lines.push(`module disc(x, y, h, r) {`);
+  lines.push(`  translate([x, y, plateThick - h]) cylinder(h=h, r=r);`);
+  lines.push(`}`);
+  lines.push(``);
   lines.push(`// Capsule edge between two 3D points (hull of two spheres).`);
   lines.push(`module edge(x1, y1, x2, y2, z, r) {`);
   lines.push(`  hull() {`);
   lines.push(`    translate([x1, y1, z]) sphere(r=r);`);
   lines.push(`    translate([x2, y2, z]) sphere(r=r);`);
   lines.push(`  }`);
+  lines.push(`}`);
+  lines.push(``);
+  lines.push(`// Flat bar between two 2D points, with height h and width w,`);
+  lines.push(`// top face at Z=plateThick. Used in flat print mode.`);
+  lines.push(`module barflat(x1, y1, x2, y2, w, h) {`);
+  lines.push(`  dx = x2 - x1; dy = y2 - y1;`);
+  lines.push(`  L = sqrt(dx*dx + dy*dy);`);
+  lines.push(`  ang = atan2(dy, dx);`);
+  lines.push(`  translate([(x1+x2)/2, (y1+y2)/2, plateThick - h/2])`);
+  lines.push(`    rotate([0, 0, ang])`);
+  lines.push(`      cube([L, w, h], center=true);`);
   lines.push(`}`);
   lines.push(``);
 
@@ -1082,14 +1236,20 @@ function exportScad() {
     lines.push(``);
   }
 
-  // Twists (hemispheres)
+  // Twists — geometry depends on print mode.
   lines.push(`// ---- twists ----`);
   lines.push(`color([1, 1, 1]) union() {`);
   state.lines.forEach((line, li) => {
     line.twists.forEach((t, ti) => {
       const x = twistX(li, ti);
       const y = lineY(li);
-      lines.push(`  hemi(${f(x)}, ${f(y)}, plateThick, twistRadius);`);
+      if (mode === 'solid') {
+        lines.push(`  hemi(${f(x)}, ${f(y)}, plateThick, twistRadius);`);
+      } else if (mode === 'embed') {
+        lines.push(`  ball(${f(x)}, ${f(y)}, ${f(p.plateThickness / 2)}, twistRadius);`);
+      } else {
+        lines.push(`  disc(${f(x)}, ${f(y)}, flatDepth, twistRadius);`);
+      }
     });
   });
   lines.push(`}`);
@@ -1098,7 +1258,10 @@ function exportScad() {
   // Edges, grouped by type so each color is one union.
   const byType = { prev: [], teth: [], lead: [], meet: [], post: [] };
   deriveEdges(state).forEach((e) => { byType[e.type]?.push(e); });
-  const edgeZ = p.plateThickness + p.edgeRadius;
+  const edgeZ =
+    mode === 'solid' ? p.plateThickness + p.edgeRadius :
+    mode === 'embed' ? p.plateThickness / 2 :
+                       null;   // flat uses a different emitter
   ['prev', 'teth', 'lead', 'meet', 'post'].forEach((type) => {
     const es = byType[type];
     if (!es || es.length === 0) return;
@@ -1112,7 +1275,19 @@ function exportScad() {
       const y1 = lineY(a.lineIdx);
       const x2 = twistX(bb.lineIdx, bb.twistIdx);
       const y2 = lineY(bb.lineIdx);
-      lines.push(`  edge(${f(x1)}, ${f(y1)}, ${f(x2)}, ${f(y2)}, ${f(edgeZ)}, edgeRadius);`);
+      if (mode === 'flat') {
+        // Shorten the bar at each end by twistRadius so it terminates at
+        // the disc circumference instead of bleeding under the disc.
+        const dx = x2 - x1, dy = y2 - y1;
+        const len = Math.hypot(dx, dy);
+        if (len <= 2 * p.twistRadius + 1e-3) return;
+        const ux = dx / len, uy = dy / len;
+        const ax = x1 + ux * p.twistRadius, ay = y1 + uy * p.twistRadius;
+        const cx = x2 - ux * p.twistRadius, cy = y2 - uy * p.twistRadius;
+        lines.push(`  barflat(${f(ax)}, ${f(ay)}, ${f(cx)}, ${f(cy)}, edgeRadius * 2, flatDepth);`);
+      } else {
+        lines.push(`  edge(${f(x1)}, ${f(y1)}, ${f(x2)}, ${f(y2)}, ${f(edgeZ)}, edgeRadius);`);
+      }
     });
     lines.push(`}`);
     lines.push(``);
@@ -1256,50 +1431,71 @@ function updateStatus() {
 }
 
 function updateFastPill() {
+  const btn = document.getElementById('btn-toggle-fast');
   const pill = document.getElementById('fast-pill');
   const label = document.getElementById('fast-label');
-  if (!pill || !label) return;
-  if (state.selection?.kind === 'twist') {
-    const info = indexTwists(state)[state.selection.id];
-    if (info && isFast(info.twist)) {
-      pill.classList.add('on');
-      label.textContent = 'Fast';
-      return;
-    }
+  if (!btn || !pill || !label) return;
+  // Only meaningful with a twist selected — hide the button otherwise
+  // so it doesn't sit in the header reading "Fast / Loose" with nothing
+  // to toggle.
+  if (state.selection?.kind !== 'twist') {
+    btn.hidden = true;
     pill.classList.remove('on');
-    label.textContent = 'Loose';
     return;
   }
-  pill.classList.remove('on');
-  label.textContent = 'Fast / Loose';
+  btn.hidden = false;
+  const info = indexTwists(state)[state.selection.id];
+  if (info && isFast(info.twist)) {
+    pill.classList.add('on');
+    label.textContent = 'Fast';
+  } else {
+    pill.classList.remove('on');
+    label.textContent = 'Loose';
+  }
+}
+
+function updateModeButtons() {
+  const mode = state.params.printMode || 'solid';
+  document.querySelectorAll('.mode-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  // depth slider only matters in flat mode
+  const ds = document.getElementById('depth-slider');
+  if (ds) ds.hidden = mode !== 'flat';
+}
+
+function setPrintMode(mode) {
+  if (!['solid', 'embed', 'flat'].includes(mode)) return;
+  state.params.printMode = mode;
+  updateModeButtons();
+  rerender();
 }
 
 function rerender() {
+  ensureSelection();
   renderEditor();
   buildScene();
   updateStatus();
+  updateModeButtons();
   saveSession();
 }
 
 document.getElementById('btn-add-line').addEventListener('click', () => {
-  addLine();
+  const twistId = addLine();
+  state.selection = { kind: 'twist', id: twistId };
   rerender();
 });
 
 document.getElementById('btn-add-twist').addEventListener('click', () => {
+  let twistId;
   if (state.selection?.kind === 'twist') {
     const info = indexTwists(state)[state.selection.id];
     if (info) {
-      addTwistAtLine(info.lineIdx, info.twistIdx + 1);
-      rerender();
-      return;
+      twistId = addTwistAtLine(info.lineIdx, info.twistIdx + 1);
     }
   }
-  let li = state.lines.length - 1;
-  if (state.selection?.kind === 'line') {
-    li = state.lines.findIndex((l) => l.id === state.selection.id);
-  }
-  addTwistAtLine(li);
+  if (!twistId) twistId = addTwistAtLine(state.lines.length - 1);
+  if (twistId) state.selection = { kind: 'twist', id: twistId };
   rerender();
 });
 
@@ -1312,11 +1508,36 @@ document.getElementById('btn-toggle-fast').addEventListener('click', () => {
 });
 
 document.getElementById('btn-remove').addEventListener('click', () => {
-  if (state.selection?.kind === 'twist') removeTwist(state.selection.id);
-  else if (state.selection?.kind === 'line') removeLine(state.selection.id);
-  else { flash('Nothing selected'); return; }
-  state.selection = null;
-  rerender();
+  const sel = state.selection;
+  if (sel?.kind !== 'twist') return;
+  // Refuse the action if this is the last twist anywhere — the editor
+  // must always have a selectable twist.
+  const total = state.lines.reduce((s, l) => s + l.twists.length, 0);
+  if (total <= 1) { flash("Can't remove the only twist"); return; }
+  const info = indexTwists(state)[sel.id];
+  if (!info) return;
+  const { line, twistIdx, lineIdx } = info;
+  removeTwist(sel.id);
+  // Pick a neighbour: prefer the previous twist on the same line, then
+  // the next one (now at the same index after splice), then any twist
+  // on the next line down, then any twist on the previous line up.
+  let nextId = null;
+  if (line.twists[twistIdx - 1]) nextId = line.twists[twistIdx - 1].id;
+  else if (line.twists[twistIdx]) nextId = line.twists[twistIdx].id;
+  else {
+    for (let li = lineIdx; li < state.lines.length && !nextId; li++) {
+      if (state.lines[li].twists.length) nextId = state.lines[li].twists[0].id;
+    }
+    for (let li = lineIdx - 1; li >= 0 && !nextId; li--) {
+      if (state.lines[li].twists.length) nextId = state.lines[li].twists[0].id;
+    }
+  }
+  state.selection = nextId ? { kind: 'twist', id: nextId } : null;
+  rerender();   // ensureSelection picks one if nextId somehow stayed null
+});
+
+document.querySelectorAll('.mode-btn').forEach((b) => {
+  b.addEventListener('click', () => setPrintMode(b.dataset.mode));
 });
 
 document.getElementById('btn-import').addEventListener('click', () => {
@@ -1342,9 +1563,6 @@ window.addEventListener('keydown', (ev) => {
     document.getElementById('btn-add-line').click();
   } else if (ev.key === 't' || ev.key === 'T') {
     document.getElementById('btn-add-twist').click();
-  } else if (ev.key === 'Escape') {
-    state.selection = null;
-    rerender();
   }
 });
 

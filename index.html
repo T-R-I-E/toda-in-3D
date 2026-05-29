@@ -230,6 +230,48 @@
   .btn-tone-lead { --tone: var(--rig-lead); }
   .btn-tone-meet { --tone: var(--rig-meet); }
   .btn-tone-post { --tone: var(--rig-post); }
+  /* Match the lens hues so the Line/Twist buttons line up with the two
+     panels they affect (red = rig editor, blue = 3D preview). */
+  .btn-tone-red  { --tone: var(--ana-red); }
+  .btn-tone-blue { --tone: #3b8cff; }
+
+  /* Panel-header action group — the panel-level toolbar (left header has
+     Line/Twist/Fast/Remove, right header has Solid/Embed/Flat). Buttons
+     read as outlined pills with a soft accent glow so they're visible
+     against the lens vignette. */
+  .panel-header-left {
+    display: inline-flex; align-items: center; gap: 10px;
+    min-width: 0;
+  }
+  .panel-header-actions {
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .panel-header-actions .btn {
+    padding: 4px 11px; font-size: 11.5px;
+    border-radius: 999px;
+    background: var(--bg-elev2);
+    border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--line-2));
+    color: var(--ink);
+    box-shadow:
+      0 0 8px color-mix(in oklab, var(--accent) 14%, transparent),
+      inset 0 0 0 1px color-mix(in oklab, var(--accent) 10%, transparent);
+  }
+  .panel-header-actions .btn:hover {
+    background: color-mix(in oklab, var(--bg-elev2) 70%, white 6%);
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--line-2));
+    box-shadow:
+      0 0 12px color-mix(in oklab, var(--accent) 28%, transparent),
+      inset 0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent);
+  }
+  .panel-header-actions .btn[hidden] { display: none; }
+  .panel-header-actions .btn.active {
+    background: color-mix(in oklab, var(--accent) 26%, var(--bg-elev2));
+    border-color: color-mix(in oklab, var(--accent) 65%, var(--line-2));
+    color: var(--ink);
+    box-shadow:
+      0 0 14px color-mix(in oklab, var(--accent) 38%, transparent),
+      inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent);
+  }
 
   .pill-toggle { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
   .pill-dot {
@@ -272,11 +314,23 @@
   .panel-lens-blue { --lens: #3b8cff;          --lens-soft: rgba(59, 140, 255, 0.18); }
 
   .panel-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    min-height: 46px;   /* match both panels so the lens viewports align */
     border-bottom: 1px solid var(--line);
     background: color-mix(in oklab, var(--bg-elev1) 50%, transparent);
+    gap: 12px;
   }
+  /* The Fast/Loose indicator sits in the middle of the header, between
+     the action buttons (left) and the status meta (right). Equal-weight
+     invisible spacers split the remaining width so the pill lands
+     between the two content groups rather than overlapping either. */
+  .panel-header-spacer { flex: 1 1 0; min-width: 8px; }
+  .panel-header-center { display: inline-flex; align-items: center; }
+  /* Small extra breather between Twist and Remove without breaking the
+     standard action-group gap. */
+  .panel-header-actions .action-gap { width: 6px; flex-shrink: 0; }
   .panel-eyebrow {
     font-family: var(--font-mono); font-size: 10.5px;
     text-transform: uppercase; letter-spacing: 0.08em;
@@ -597,32 +651,6 @@
       </span>
     </div>
 
-    <div class="divider-v"></div>
-
-    <div class="tool-group" role="group" aria-label="Create">
-      <button class="btn btn-tone btn-tone-teth" id="btn-add-line" title="Add a new line (N)">
-        <span class="btn-icon"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M7 2v10M2 7h10"/></svg></span>
-        <span>Line</span>
-      </button>
-      <button class="btn btn-tone btn-tone-post" id="btn-add-twist" title="Add a twist (T)">
-        <span class="btn-icon"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3 3c2 3 6 3 8 0M3 11c2-3 6-3 8 0M3 7h8"/></svg></span>
-        <span>Twist</span>
-      </button>
-    </div>
-
-    <div class="tool-group" role="group" aria-label="Modify">
-      <button class="btn btn-ghost" id="btn-toggle-fast" title="Toggle fast (F)">
-        <span class="pill-toggle" id="fast-pill">
-          <span class="pill-dot"></span>
-          <span id="fast-label">Fast / Loose</span>
-        </span>
-      </button>
-      <button class="btn btn-ghost" id="btn-remove" title="Remove (Del)">
-        <span class="btn-icon"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2.5 4h9M5.5 2.5h3M3.5 4l.7 8h5.6l.7-8M6 6.5v4M8 6.5v4"/></svg></span>
-        <span>Remove</span>
-      </button>
-    </div>
-
     <div class="spacer"></div>
 
     <div class="io-group" role="group" aria-label="Import / export">
@@ -653,7 +681,34 @@
   <main class="stage">
     <section class="panel panel-lens-red" aria-label="Rig editor">
       <div class="panel-header">
-        <span class="panel-eyebrow">Rig editor <span class="lens-tag lens-tag-red">L · left lens</span></span>
+        <span class="panel-header-left">
+          <span class="panel-eyebrow">Rig editor</span>
+          <span class="panel-header-actions">
+            <button class="btn" id="btn-add-line" title="Add a new line (N)">
+              <span class="btn-icon"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M7 2v10M2 7h10"/></svg></span>
+              <span>Line</span>
+            </button>
+            <button class="btn" id="btn-add-twist" title="Add a twist (T)">
+              <span class="btn-icon"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M7 2v10M2 7h10"/></svg></span>
+              <span>Twist</span>
+            </button>
+            <span class="action-gap" aria-hidden="true"></span>
+            <button class="btn" id="btn-remove" title="Remove (Del)">
+              <span class="btn-icon"><svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2.5 4h9M5.5 2.5h3M3.5 4l.7 8h5.6l.7-8M6 6.5v4M8 6.5v4"/></svg></span>
+              <span>Remove</span>
+            </button>
+          </span>
+        </span>
+        <span class="panel-header-spacer" aria-hidden="true"></span>
+        <span class="panel-header-center">
+          <button class="btn" id="btn-toggle-fast" hidden title="Toggle fast (F)">
+            <span class="pill-toggle" id="fast-pill">
+              <span class="pill-dot"></span>
+              <span id="fast-label">Loose</span>
+            </span>
+          </button>
+        </span>
+        <span class="panel-header-spacer" aria-hidden="true"></span>
         <span class="panel-meta mono" id="panel-meta-editor"></span>
       </div>
       <div class="panel-body">
@@ -667,8 +722,18 @@
 
     <section class="panel panel-lens-blue" aria-label="3D preview">
       <div class="panel-header">
-        <span class="panel-eyebrow">3D preview <span class="lens-tag lens-tag-blue">R · right lens</span></span>
-        <span class="panel-meta mono">drag to orbit</span>
+        <span class="panel-header-left">
+          <span class="panel-eyebrow">3D preview</span>
+          <span class="panel-header-actions">
+            <button class="btn mode-btn active" id="btn-mode-solid" data-mode="solid" title="Solid: hemispheres + cylinders on plate">Solid</button>
+            <button class="btn mode-btn" id="btn-mode-embed" data-mode="embed" title="Embed: full spheres + cylinders inside plate (print plate transparent)">Embed</button>
+            <button class="btn mode-btn" id="btn-mode-flat" data-mode="flat" title="Flat: discs + bars sunk into plate (biz-card style)">Flat</button>
+          </span>
+        </span>
+        <span class="panel-header-spacer" aria-hidden="true"></span>
+        <span class="panel-header-center" aria-hidden="true"></span>
+        <span class="panel-header-spacer" aria-hidden="true"></span>
+        <span class="panel-meta mono">drag orbit · wheel zoom · right-drag pan</span>
       </div>
       <div class="panel-body">
         <div class="lens-viewport">
@@ -705,7 +770,7 @@
     <div class="controls" id="params">
       <label class="slider tone-post">
         <span class="slider-label">plate</span>
-        <span class="slider-track-wrap"><input type="range" data-p="plateThickness" min="0.5" max="6" step="0.1"></span>
+        <span class="slider-track-wrap"><input type="range" data-p="plateThickness" min="0.5" max="12" step="0.1"></span>
         <span class="slider-value" data-v="plateThickness"></span>
       </label>
       <label class="slider tone-teth">
@@ -737,6 +802,11 @@
         <span class="slider-label">line gap</span>
         <span class="slider-track-wrap"><input type="range" data-p="lineSpacing" min="14" max="48" step="1"></span>
         <span class="slider-value" data-v="lineSpacing"></span>
+      </label>
+      <label class="slider tone-post" id="depth-slider" hidden>
+        <span class="slider-label">depth</span>
+        <span class="slider-track-wrap"><input type="range" data-p="flatDepth" min="0.2" max="12" step="0.1"></span>
+        <span class="slider-value" data-v="flatDepth"></span>
       </label>
     </div>
     <div class="controls-fade" id="controls-fade" title="scroll for more">
