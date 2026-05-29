@@ -1,0 +1,14 @@
+# local Claude harness config (per-machine permissions etc.)
+.claude/
+
+# personal deploy script with hard-coded host
+rsyncer
+
+# UI sketch / scratch HTML
+facelift.html
+
+# editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
