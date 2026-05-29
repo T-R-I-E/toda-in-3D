@@ -1,6 +1,8 @@
 # TODA in 3-D
 
-> A presentation of T.R.I.E. — now in eye-popping anaglyph.
+> See your rigging in eye-popping 3-D! 
+> Dare the visually overstimulating anaglyphs to print a handheld toda file!
+> Print out your precious rigs as keepsakes, for safekeeping!
 
 A single-page web app for designing a TODA rig topologically and
 exporting it as a 3D-printable `.3mf`. No backend, no build step, no
@@ -13,9 +15,7 @@ convention is the `~/Dev` static server on port 8080:
 
     http://localhost:8080/toda/toda-in-3D/
 
-A theme toggle in the top-right flips between dark and light.
-
-## Two panels, two lenses
+## Double lenses all the way
 
 The stage is split into two equal viewports, each clipped by a coloured
 lens frame.
@@ -49,7 +49,7 @@ visually owns its area — biz-card aesthetic. The *depth* slider only
 appears when Flat is selected; it's an absolute mm value, clamped to
 plate thickness.
 
-**Embed** and **Flat** are designed for prints where the plate filament
+**Embed** is designed for prints where the plate filament
 is transparent: the colored inclusions read through the plate like a
 paperweight.
 
@@ -96,8 +96,7 @@ To start fresh, clear that key from DevTools.
 
 Three.js is Y-up; the printer / 3MF / OpenSCAD are Z-up. The exporter
 applies a true X+90° rotation (not a Y↔Z swap, which would mirror) and
-translates so all coordinates stay positive. The corkline lands at the
-back of the bed, matching "top of screen" in the editor.
+translates so all coordinates stay positive. It's important to always stay positive!
 
 ---
 
