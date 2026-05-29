@@ -1,11 +1,15 @@
 # TODA in 3-D
 
 > See your rigging in eye-popping 3-D! 
+
 > Dare the visually overstimulating anaglyphs to print a handheld toda file!
 
 A single-page web app for designing a TODA rig topologically and
 exporting it as a 3D-printable `.3mf`. No backend, no build step, no
 dependencies beyond Three.js loaded from a CDN.
+
+See it in action: https://trie.fun/toda3D/
+
 
 ## Showtime
 
